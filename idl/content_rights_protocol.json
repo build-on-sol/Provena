@@ -1,0 +1,3532 @@
+{
+  "address": "Fg6PaFpoGXkYsidMpWxTWqkZ86H8vFnafnHCW3Yj6nD",
+  "metadata": {
+    "name": "content_rights_protocol",
+    "version": "0.1.0",
+    "spec": "0.1.0"
+  },
+  "instructions": [
+    {
+      "name": "accept_settlement",
+      "discriminator": [
+        203,
+        247,
+        191,
+        177,
+        25,
+        90,
+        88,
+        75
+      ],
+      "accounts": [
+        {
+          "name": "author",
+          "signer": true
+        },
+        {
+          "name": "case",
+          "relations": [
+            "settlement"
+          ]
+        },
+        {
+          "name": "settlement",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "add_asset_policy",
+      "discriminator": [
+        100,
+        33,
+        153,
+        100,
+        42,
+        245,
+        217,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "approve_original",
+      "discriminator": [
+        93,
+        20,
+        137,
+        54,
+        107,
+        116,
+        177,
+        205
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "originality",
+          "signer": true
+        },
+        {
+          "name": "content",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_liquid",
+      "discriminator": [
+        61,
+        54,
+        85,
+        90,
+        25,
+        227,
+        2,
+        114
+      ],
+      "accounts": [
+        {
+          "name": "recipient",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "content",
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "epoch",
+          "writable": true
+        },
+        {
+          "name": "asset",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "epoch",
+            "asset"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset"
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "leaf",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "leaf"
+              },
+              {
+                "kind": "account",
+                "path": "recipient"
+              }
+            ]
+          }
+        },
+        {
+          "name": "review",
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "relations": [
+            "asset"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": {
+            "defined": {
+              "name": "ClaimProof"
+            }
+          }
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "confirm_independent",
+      "discriminator": [
+        78,
+        80,
+        113,
+        243,
+        59,
+        207,
+        233,
+        133
+      ],
+      "accounts": [
+        {
+          "name": "content",
+          "writable": true
+        },
+        {
+          "name": "case",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "content"
+              }
+            ]
+          }
+        },
+        {
+          "name": "candidate_author",
+          "signer": true
+        },
+        {
+          "name": "reference_author",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_original_node",
+      "discriminator": [
+        95,
+        25,
+        222,
+        104,
+        217,
+        185,
+        227,
+        44
+      ],
+      "accounts": [
+        {
+          "name": "author",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "content",
+          "writable": true
+        },
+        {
+          "name": "node",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  105,
+                  103,
+                  105,
+                  110,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "content"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tip_child_bps",
+          "type": "u16"
+        },
+        {
+          "name": "sale_child_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "create_repost_node",
+      "discriminator": [
+        77,
+        168,
+        7,
+        159,
+        94,
+        73,
+        225,
+        9
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rights",
+          "signer": true
+        },
+        {
+          "name": "content"
+        },
+        {
+          "name": "node",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "RepostArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "finalize_derivative_settlement",
+      "discriminator": [
+        134,
+        31,
+        43,
+        28,
+        107,
+        244,
+        157,
+        14
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rights",
+          "signer": true
+        },
+        {
+          "name": "content",
+          "writable": true
+        },
+        {
+          "name": "case",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "content"
+              }
+            ]
+          },
+          "relations": [
+            "settlement"
+          ]
+        },
+        {
+          "name": "settlement",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "finalize_exit",
+      "discriminator": [
+        56,
+        188,
+        164,
+        204,
+        68,
+        131,
+        88,
+        100
+      ],
+      "accounts": [
+        {
+          "name": "recipient",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "content",
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "epoch",
+          "writable": true
+        },
+        {
+          "name": "asset",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "epoch",
+            "asset"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset"
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "leaf",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "leaf"
+              },
+              {
+                "kind": "account",
+                "path": "recipient"
+              }
+            ]
+          }
+        },
+        {
+          "name": "review",
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "relations": [
+            "asset"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": {
+            "defined": {
+              "name": "ClaimProof"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "initialize_protocol",
+      "discriminator": [
+        188,
+        233,
+        252,
+        106,
+        134,
+        146,
+        202,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "Fg6PaFpoGXkYsidMpWxTWqkZ86H8vFnafnHCW3Yj6nD"
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "originality",
+          "type": "pubkey"
+        },
+        {
+          "name": "rights",
+          "type": "pubkey"
+        },
+        {
+          "name": "treasury",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "license_source",
+      "discriminator": [
+        181,
+        237,
+        16,
+        61,
+        189,
+        188,
+        182,
+        154
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "rights",
+          "signer": true
+        },
+        {
+          "name": "author",
+          "signer": true
+        },
+        {
+          "name": "content",
+          "writable": true
+        },
+        {
+          "name": "source_content"
+        },
+        {
+          "name": "source_author",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "source_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "open_revenue_epoch",
+      "discriminator": [
+        86,
+        241,
+        131,
+        199,
+        212,
+        124,
+        164,
+        162
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "content",
+          "relations": [
+            "node"
+          ]
+        },
+        {
+          "name": "node",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "epoch",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "kind",
+          "type": "u8"
+        },
+        {
+          "name": "nonce",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "open_similarity_case",
+      "discriminator": [
+        102,
+        105,
+        240,
+        191,
+        33,
+        239,
+        122,
+        240
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "originality",
+          "signer": true
+        },
+        {
+          "name": "content",
+          "writable": true
+        },
+        {
+          "name": "reference"
+        },
+        {
+          "name": "case",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "content"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "evidence_commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "propose_settlement",
+      "discriminator": [
+        228,
+        149,
+        56,
+        61,
+        137,
+        43,
+        106,
+        25
+      ],
+      "accounts": [
+        {
+          "name": "author",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "case",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "case.candidate",
+                "account": "SimilarityCase"
+              }
+            ]
+          }
+        },
+        {
+          "name": "settlement",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  101,
+                  116,
+                  116,
+                  108,
+                  101,
+                  109,
+                  101,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "case"
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "source_bps",
+          "type": "u16"
+        },
+        {
+          "name": "commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "purchase_access",
+      "discriminator": [
+        191,
+        249,
+        111,
+        210,
+        163,
+        248,
+        87,
+        242
+      ],
+      "accounts": [
+        {
+          "name": "buyer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "economic",
+          "accounts": [
+            {
+              "name": "funder",
+              "signer": true
+            },
+            {
+              "name": "config",
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      99,
+                      111,
+                      110,
+                      102,
+                      105,
+                      103
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "name": "content",
+              "writable": true,
+              "relations": [
+                "node",
+                "epoch"
+              ]
+            },
+            {
+              "name": "node",
+              "relations": [
+                "epoch"
+              ]
+            },
+            {
+              "name": "epoch",
+              "writable": true
+            },
+            {
+              "name": "asset",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      97,
+                      115,
+                      115,
+                      101,
+                      116
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "mint"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "mint",
+              "relations": [
+                "epoch",
+                "asset"
+              ]
+            },
+            {
+              "name": "source",
+              "writable": true
+            },
+            {
+              "name": "vault",
+              "writable": true,
+              "pda": {
+                "seeds": [
+                  {
+                    "kind": "const",
+                    "value": [
+                      118,
+                      97,
+                      117,
+                      108,
+                      116
+                    ]
+                  },
+                  {
+                    "kind": "account",
+                    "path": "asset"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "review",
+              "optional": true
+            },
+            {
+              "name": "token_program",
+              "relations": [
+                "asset"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  99,
+                  99,
+                  101,
+                  115,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "economic.content",
+                "account": "Economic"
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "request_safeguard_exit",
+      "discriminator": [
+        76,
+        221,
+        89,
+        207,
+        233,
+        44,
+        45,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "recipient",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "content",
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "epoch",
+          "writable": true
+        },
+        {
+          "name": "asset",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "epoch",
+            "asset"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset"
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "leaf",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "leaf"
+              },
+              {
+                "kind": "account",
+                "path": "recipient"
+              }
+            ]
+          }
+        },
+        {
+          "name": "review",
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "relations": [
+            "asset"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": {
+            "defined": {
+              "name": "ClaimProof"
+            }
+          }
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "submit_content",
+      "discriminator": [
+        83,
+        67,
+        55,
+        88,
+        192,
+        77,
+        115,
+        15
+      ],
+      "accounts": [
+        {
+          "name": "author",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "originality",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "content",
+          "writable": true
+        },
+        {
+          "name": "fingerprint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  102,
+                  105,
+                  110,
+                  103,
+                  101,
+                  114,
+                  112,
+                  114,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "args.canonical_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "SubmitArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "sweep_expired_claim_window",
+      "discriminator": [
+        191,
+        225,
+        90,
+        108,
+        255,
+        198,
+        156,
+        216
+      ],
+      "accounts": [
+        {
+          "name": "recipient",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "content",
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "epoch",
+          "writable": true
+        },
+        {
+          "name": "asset",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "epoch",
+            "asset"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset"
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "leaf",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "leaf"
+              },
+              {
+                "kind": "account",
+                "path": "recipient"
+              }
+            ]
+          }
+        },
+        {
+          "name": "review",
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "relations": [
+            "asset"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "proof",
+          "type": {
+            "defined": {
+              "name": "ClaimProof"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "tip",
+      "discriminator": [
+        77,
+        164,
+        35,
+        21,
+        36,
+        121,
+        213,
+        51
+      ],
+      "accounts": [
+        {
+          "name": "funder",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "content",
+          "writable": true,
+          "relations": [
+            "node",
+            "epoch"
+          ]
+        },
+        {
+          "name": "node",
+          "relations": [
+            "epoch"
+          ]
+        },
+        {
+          "name": "epoch",
+          "writable": true
+        },
+        {
+          "name": "asset",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "epoch",
+            "asset"
+          ]
+        },
+        {
+          "name": "source",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset"
+              }
+            ]
+          }
+        },
+        {
+          "name": "review",
+          "optional": true
+        },
+        {
+          "name": "token_program",
+          "relations": [
+            "asset"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "transition_dispute_to_safeguard",
+      "discriminator": [
+        184,
+        75,
+        129,
+        231,
+        53,
+        7,
+        45,
+        132
+      ],
+      "accounts": [
+        {
+          "name": "case",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  115,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "case.candidate",
+                "account": "SimilarityCase"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_asset_policy",
+      "discriminator": [
+        156,
+        28,
+        90,
+        219,
+        24,
+        173,
+        240,
+        51
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset.mint",
+                "account": "AssetPolicy"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "enabled",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "update_repost_policy",
+      "discriminator": [
+        253,
+        48,
+        155,
+        209,
+        78,
+        223,
+        81,
+        144
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "signer": true,
+          "relations": [
+            "node"
+          ]
+        },
+        {
+          "name": "node",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "tip_child_bps",
+          "type": "u16"
+        },
+        {
+          "name": "sale_child_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_protocol_fees",
+      "discriminator": [
+        11,
+        68,
+        165,
+        98,
+        18,
+        208,
+        134,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "asset",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  115,
+                  115,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "asset"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "asset"
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "relations": [
+            "asset"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "AccessReceipt",
+      "discriminator": [
+        160,
+        208,
+        81,
+        74,
+        140,
+        203,
+        172,
+        176
+      ]
+    },
+    {
+      "name": "AssetPolicy",
+      "discriminator": [
+        126,
+        207,
+        10,
+        101,
+        214,
+        78,
+        108,
+        8
+      ]
+    },
+    {
+      "name": "ClaimPosition",
+      "discriminator": [
+        155,
+        116,
+        2,
+        40,
+        134,
+        98,
+        12,
+        0
+      ]
+    },
+    {
+      "name": "Content",
+      "discriminator": [
+        3,
+        76,
+        253,
+        21,
+        4,
+        198,
+        52,
+        206
+      ]
+    },
+    {
+      "name": "DistributionNode",
+      "discriminator": [
+        10,
+        3,
+        177,
+        125,
+        241,
+        226,
+        116,
+        92
+      ]
+    },
+    {
+      "name": "FingerprintRegistry",
+      "discriminator": [
+        39,
+        111,
+        27,
+        149,
+        171,
+        194,
+        236,
+        62
+      ]
+    },
+    {
+      "name": "LeafPosition",
+      "discriminator": [
+        100,
+        83,
+        177,
+        46,
+        148,
+        116,
+        252,
+        172
+      ]
+    },
+    {
+      "name": "ProtocolConfig",
+      "discriminator": [
+        207,
+        91,
+        250,
+        28,
+        152,
+        179,
+        215,
+        209
+      ]
+    },
+    {
+      "name": "RevenueEpoch",
+      "discriminator": [
+        92,
+        96,
+        185,
+        132,
+        167,
+        75,
+        54,
+        150
+      ]
+    },
+    {
+      "name": "Settlement",
+      "discriminator": [
+        55,
+        11,
+        219,
+        33,
+        36,
+        136,
+        40,
+        182
+      ]
+    },
+    {
+      "name": "SimilarityCase",
+      "discriminator": [
+        46,
+        41,
+        35,
+        13,
+        202,
+        68,
+        161,
+        128
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AccessPurchased",
+      "discriminator": [
+        181,
+        7,
+        225,
+        172,
+        63,
+        248,
+        25,
+        38
+      ]
+    },
+    {
+      "name": "ContentApproved",
+      "discriminator": [
+        240,
+        90,
+        4,
+        199,
+        45,
+        59,
+        58,
+        252
+      ]
+    },
+    {
+      "name": "ContentSubmitted",
+      "discriminator": [
+        175,
+        55,
+        58,
+        80,
+        158,
+        52,
+        160,
+        2
+      ]
+    },
+    {
+      "name": "DerivativeConfirmed",
+      "discriminator": [
+        207,
+        78,
+        8,
+        100,
+        159,
+        241,
+        131,
+        245
+      ]
+    },
+    {
+      "name": "DistributionNodeCreated",
+      "discriminator": [
+        196,
+        140,
+        189,
+        211,
+        188,
+        5,
+        110,
+        115
+      ]
+    },
+    {
+      "name": "IndependentConfirmed",
+      "discriminator": [
+        197,
+        231,
+        177,
+        194,
+        191,
+        23,
+        178,
+        241
+      ]
+    },
+    {
+      "name": "RepostPolicyUpdated",
+      "discriminator": [
+        162,
+        155,
+        39,
+        188,
+        228,
+        39,
+        221,
+        152
+      ]
+    },
+    {
+      "name": "RevenueClaimed",
+      "discriminator": [
+        5,
+        254,
+        104,
+        87,
+        133,
+        137,
+        45,
+        116
+      ]
+    },
+    {
+      "name": "RevenueEnteredSafeguard",
+      "discriminator": [
+        197,
+        228,
+        139,
+        193,
+        179,
+        101,
+        74,
+        125
+      ]
+    },
+    {
+      "name": "SafeguardExitClaimable",
+      "discriminator": [
+        135,
+        249,
+        215,
+        158,
+        199,
+        91,
+        60,
+        6
+      ]
+    },
+    {
+      "name": "SafeguardExitRequested",
+      "discriminator": [
+        1,
+        164,
+        241,
+        136,
+        247,
+        200,
+        110,
+        132
+      ]
+    },
+    {
+      "name": "SettlementAccepted",
+      "discriminator": [
+        126,
+        2,
+        19,
+        157,
+        94,
+        224,
+        187,
+        150
+      ]
+    },
+    {
+      "name": "SettlementProposed",
+      "discriminator": [
+        139,
+        32,
+        64,
+        205,
+        27,
+        154,
+        100,
+        147
+      ]
+    },
+    {
+      "name": "SimilarityCaseOpened",
+      "discriminator": [
+        255,
+        37,
+        65,
+        46,
+        15,
+        183,
+        163,
+        57
+      ]
+    },
+    {
+      "name": "TipReceived",
+      "discriminator": [
+        24,
+        50,
+        123,
+        10,
+        169,
+        249,
+        154,
+        112
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Unauthorized",
+      "msg": "Unauthorized authority or recipient"
+    },
+    {
+      "code": 6001,
+      "name": "Paused",
+      "msg": "Protocol deposits are paused"
+    },
+    {
+      "code": 6002,
+      "name": "UnsupportedAsset",
+      "msg": "Unsupported asset or token extension"
+    },
+    {
+      "code": 6003,
+      "name": "DuplicateContent",
+      "msg": "Global canonical fingerprint already reserved"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidCanonicalHash",
+      "msg": "Invalid canonicalization version or zero hash"
+    },
+    {
+      "code": 6005,
+      "name": "ContentNotApproved",
+      "msg": "Content is not approved"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidPayoutRoot",
+      "msg": "Invalid payout root or role"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidMerkleProof",
+      "msg": "Invalid Merkle proof"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidShareBps",
+      "msg": "Invalid basis-point share"
+    },
+    {
+      "code": 6009,
+      "name": "InsufficientBalance",
+      "msg": "Amount exceeds remaining recipient balance"
+    },
+    {
+      "code": 6010,
+      "name": "ClaimWindowExpired",
+      "msg": "Fixed claim window expired"
+    },
+    {
+      "code": 6011,
+      "name": "EpochClosed",
+      "msg": "Expired normal epoch requires a new epoch"
+    },
+    {
+      "code": 6012,
+      "name": "SafeguardExitRequired",
+      "msg": "Safeguarded funds require an exit request"
+    },
+    {
+      "code": 6013,
+      "name": "ExitCooldownActive",
+      "msg": "Minimum 48-hour cooldown is active"
+    },
+    {
+      "code": 6014,
+      "name": "ExitNotReady",
+      "msg": "Exit amount has not been requested or expired"
+    },
+    {
+      "code": 6015,
+      "name": "ExitAlreadyPending",
+      "msg": "An irrevocable exit request is already pending"
+    },
+    {
+      "code": 6016,
+      "name": "CaseAlreadyResolved",
+      "msg": "Case is already resolved"
+    },
+    {
+      "code": 6017,
+      "name": "SettlementMismatch",
+      "msg": "Case or accepted settlement mismatches content"
+    },
+    {
+      "code": 6018,
+      "name": "DisputeStillActive",
+      "msg": "Unresolved dispute locks all principal"
+    },
+    {
+      "code": 6019,
+      "name": "CutoffNotReached",
+      "msg": "Safeguard cutoff not reached"
+    },
+    {
+      "code": 6020,
+      "name": "MathOverflow",
+      "msg": "Integer arithmetic overflow"
+    },
+    {
+      "code": 6021,
+      "name": "InvalidTokenProgram",
+      "msg": "Wrong token program"
+    },
+    {
+      "code": 6022,
+      "name": "InvalidMint",
+      "msg": "Wrong mint"
+    },
+    {
+      "code": 6023,
+      "name": "InvalidRevenueKind",
+      "msg": "Wrong revenue kind"
+    },
+    {
+      "code": 6024,
+      "name": "InvalidAccount",
+      "msg": "Invalid account or nonce"
+    },
+    {
+      "code": 6025,
+      "name": "PrincipalProtected",
+      "msg": "Treasury may withdraw only finalized earned fees"
+    }
+  ],
+  "types": [
+    {
+      "name": "AccessPurchased",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "content",
+            "type": "pubkey"
+          },
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AccessReceipt",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "content",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "purchase_node",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AssetPolicy",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "token_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          },
+          {
+            "name": "safeguard_enabled",
+            "type": "bool"
+          },
+          {
+            "name": "future_strategy_enabled",
+            "type": "bool"
+          },
+          {
+            "name": "user_liability",
+            "type": "u64"
+          },
+          {
+            "name": "earned_fees",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ClaimPosition",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "leaf",
+            "type": "pubkey"
+          },
+          {
+            "name": "recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "paid",
+            "type": "u64"
+          },
+          {
+            "name": "exit_amount",
+            "type": "u64"
+          },
+          {
+            "name": "exit_requested_at",
+            "type": "i64"
+          },
+          {
+            "name": "automatic_exit_applied",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ClaimProof",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "beneficiary",
+            "type": "pubkey"
+          },
+          {
+            "name": "role",
+            "type": "u8"
+          },
+          {
+            "name": "share_bps",
+            "type": "u16"
+          },
+          {
+            "name": "siblings",
+            "type": {
+              "vec": {
+                "array": [
+                  "u8",
+                  32
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Content",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "author",
+            "type": "pubkey"
+          },
+          {
+            "name": "raw_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "canonical_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "canonicalization_version",
+            "type": "u16"
+          },
+          {
+            "name": "metadata_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "storage_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "citation_manifest_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "mode",
+            "type": "u8"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          },
+          {
+            "name": "quote_policy",
+            "type": "u8"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "price_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "original_node",
+            "type": "pubkey"
+          },
+          {
+            "name": "licensed_source",
+            "type": "pubkey"
+          },
+          {
+            "name": "licensed_source_bps",
+            "type": "u16"
+          },
+          {
+            "name": "derivative_source",
+            "type": "pubkey"
+          },
+          {
+            "name": "derivative_source_bps",
+            "type": "u16"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "normal_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "active_case",
+            "type": "pubkey"
+          },
+          {
+            "name": "case_resolved",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ContentApproved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "content",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ContentSubmitted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "content",
+            "type": "pubkey"
+          },
+          {
+            "name": "author",
+            "type": "pubkey"
+          },
+          {
+            "name": "raw_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DerivativeConfirmed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "case",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_bps",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DistributionNode",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "content",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "tip_payout_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "sale_payout_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "tip_child_bps",
+            "type": "u16"
+          },
+          {
+            "name": "sale_child_bps",
+            "type": "u16"
+          },
+          {
+            "name": "tip_residual_bps",
+            "type": "u16"
+          },
+          {
+            "name": "sale_residual_bps",
+            "type": "u16"
+          },
+          {
+            "name": "provenance_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "next_epoch",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DistributionNodeCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "content",
+            "type": "pubkey"
+          },
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FingerprintRegistry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "canonical_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "content",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "IndependentConfirmed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "case",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LeafPosition",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "epoch",
+            "type": "pubkey"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "role",
+            "type": "u8"
+          },
+          {
+            "name": "share_bps",
+            "type": "u16"
+          },
+          {
+            "name": "paid",
+            "type": "u64"
+          },
+          {
+            "name": "finalized",
+            "type": "bool"
+          },
+          {
+            "name": "owner_allocation",
+            "type": "u64"
+          },
+          {
+            "name": "source_allocation",
+            "type": "u64"
+          },
+          {
+            "name": "source",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "originality_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "rights_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RepostArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nonce",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "tip_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "sale_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "tip_child_bps",
+            "type": "u16"
+          },
+          {
+            "name": "sale_child_bps",
+            "type": "u16"
+          },
+          {
+            "name": "tip_residual_bps",
+            "type": "u16"
+          },
+          {
+            "name": "sale_residual_bps",
+            "type": "u16"
+          },
+          {
+            "name": "provenance_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "RepostPolicyUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "tip",
+            "type": "u16"
+          },
+          {
+            "name": "sale",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RevenueClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "epoch",
+            "type": "pubkey"
+          },
+          {
+            "name": "beneficiary",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RevenueEnteredSafeguard",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "epoch",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RevenueEpoch",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "content",
+            "type": "pubkey"
+          },
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "kind",
+            "type": "u8"
+          },
+          {
+            "name": "payout_root",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "gross",
+            "type": "u64"
+          },
+          {
+            "name": "paid",
+            "type": "u64"
+          },
+          {
+            "name": "fees",
+            "type": "u64"
+          },
+          {
+            "name": "opened_at",
+            "type": "i64"
+          },
+          {
+            "name": "deadline",
+            "type": "i64"
+          },
+          {
+            "name": "post_review",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SafeguardExitClaimable",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "ready_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SafeguardExitRequested",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "position",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "requested_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Settlement",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "case",
+            "type": "pubkey"
+          },
+          {
+            "name": "source_bps",
+            "type": "u16"
+          },
+          {
+            "name": "candidate_accepted",
+            "type": "bool"
+          },
+          {
+            "name": "reference_accepted",
+            "type": "bool"
+          },
+          {
+            "name": "finalized",
+            "type": "bool"
+          },
+          {
+            "name": "commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SettlementAccepted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "settlement",
+            "type": "pubkey"
+          },
+          {
+            "name": "author",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SettlementProposed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "case",
+            "type": "pubkey"
+          },
+          {
+            "name": "settlement",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SimilarityCase",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "candidate",
+            "type": "pubkey"
+          },
+          {
+            "name": "reference",
+            "type": "pubkey"
+          },
+          {
+            "name": "candidate_author",
+            "type": "pubkey"
+          },
+          {
+            "name": "reference_author",
+            "type": "pubkey"
+          },
+          {
+            "name": "evidence_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "started_at",
+            "type": "i64"
+          },
+          {
+            "name": "cutoff",
+            "type": "i64"
+          },
+          {
+            "name": "status",
+            "type": "u8"
+          },
+          {
+            "name": "resolution",
+            "type": "u8"
+          },
+          {
+            "name": "resolved_at",
+            "type": "i64"
+          },
+          {
+            "name": "source_bps",
+            "type": "u16"
+          },
+          {
+            "name": "next_proposal",
+            "type": "u64"
+          },
+          {
+            "name": "settlement_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "SimilarityCaseOpened",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "case",
+            "type": "pubkey"
+          },
+          {
+            "name": "candidate",
+            "type": "pubkey"
+          },
+          {
+            "name": "reference",
+            "type": "pubkey"
+          },
+          {
+            "name": "cutoff",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SubmitArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "raw_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "canonical_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "canonicalization_version",
+            "type": "u16"
+          },
+          {
+            "name": "metadata_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "storage_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "citation_manifest_commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "mode",
+            "type": "u8"
+          },
+          {
+            "name": "quote_policy",
+            "type": "u8"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          },
+          {
+            "name": "price_mint",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TipReceived",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "content",
+            "type": "pubkey"
+          },
+          {
+            "name": "node",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

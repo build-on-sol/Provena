@@ -1,0 +1,10 @@
+node_modules/
+dist/
+target/
+.anchor/
+.local-tools/
+.env
+*.log
+*.keypair.json
+data/
+.local-data/

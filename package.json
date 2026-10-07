@@ -1,0 +1,17 @@
+{
+  "name": "provena", "version": "0.1.0", "private": true,
+  "description": "Solana content rights settlement protocol V0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/tests/*.test.js dist/services/*.test.js",
+    "test:rust": "cargo test --workspace",
+    "build:program": "cargo build-sbf --tools-version v1.57 --manifest-path programs/content_rights_protocol/Cargo.toml --sbf-out-dir target/deploy",
+    "build:idl": "cargo run -p content-rights-protocol --example build_idl -- programs/content_rights_protocol idl/content_rights_protocol.json",
+    "test:vm": "cargo test -p content-rights-protocol --test security -- --ignored",
+    "service": "node dist/services/server.js"
+  },
+  "dependencies": { "@coral-xyz/anchor": "0.32.1", "@solana/web3.js": "1.98.4" },
+  "devDependencies": { "@types/node": "22.18.0", "typescript": "5.9.2" },
+  "overrides": { "toml": "4.2.0", "jayson": "5.0.0" },
+  "engines": { "node": ">=22" }
+}
