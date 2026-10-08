@@ -53,6 +53,7 @@ struct Fixture {
     reference: Pubkey,
     node: Pubkey,
     mint: Pubkey,
+    token_program: Pubkey,
     asset: Pubkey,
     vault: Pubkey,
     epoch: Pubkey,
@@ -318,6 +319,7 @@ impl Fixture {
             reference,
             node,
             mint,
+            token_program: spl_token::ID,
             asset,
             vault,
             epoch,
@@ -395,7 +397,7 @@ impl Fixture {
             source: self.funding,
             vault: self.vault,
             review: self.review,
-            token_program: spl_token::ID,
+            token_program: self.token_program,
         }
     }
     fn tip_ix(&self, amount: u64) -> Instruction {
@@ -452,7 +454,7 @@ impl Fixture {
             leaf: self.leaf_key(proof),
             position: self.position_key(proof, who),
             review: self.review,
-            token_program: spl_token::ID,
+            token_program: self.token_program,
             system_program: system_program::ID,
         }
     }
@@ -2284,4 +2286,688 @@ fn materialized_safeguard_exit_and_case_clock_guard_boundaries_and_emit_events()
     assert_eq!(case.cutoff, START + 7 * DAY);
     g.independent();
     g.rejects(transition(&g), &[], ProtocolError::CaseAlreadyResolved);
+}
+
+impl Fixture {
+    /// Admit a plain Token-2022 mint through the actual program instruction, then
+    /// reuse the same economic fixture with that mint's real Token-2022 vault.
+    fn approve_token2022(&mut self) {
+        let mint = Pubkey::new_unique();
+        put_mint(&mut self.vm, mint);
+        let mut mint_account = self.vm.get_account(&mint).unwrap();
+        mint_account.owner = anchor_spl::token_2022::ID;
+        self.vm.set_account(mint, mint_account).unwrap();
+        let asset = pda(&[b"asset", mint.as_ref()]);
+        let vault = pda(&[b"vault", asset.as_ref()]);
+        self.succeeds(
+            Instruction {
+                program_id: protocol::ID,
+                accounts: accounts::AddAsset {
+                    admin: self.admin.pubkey(),
+                    config: self.config,
+                    asset,
+                    mint,
+                    vault,
+                    token_program: anchor_spl::token_2022::ID,
+                    system_program: system_program::ID,
+                }
+                .to_account_metas(None),
+                data: instruction::AddAssetPolicy {}.data(),
+            },
+            &[Who::Admin],
+        );
+        self.mint = mint;
+        self.asset = asset;
+        self.vault = vault;
+        self.token_program = anchor_spl::token_2022::ID;
+        self.funding = Pubkey::new_unique();
+        self.author_destination = Pubkey::new_unique();
+        self.source_destination = Pubkey::new_unique();
+        self.attacker_destination = Pubkey::new_unique();
+        self.treasury_destination = Pubkey::new_unique();
+        for (key, owner, amount) in [
+            (self.funding, self.buyer.pubkey(), 1_000_000),
+            (self.author_destination, self.author.pubkey(), 0),
+            (self.source_destination, self.source.pubkey(), 0),
+            (self.attacker_destination, self.attacker.pubkey(), 0),
+            (self.treasury_destination, self.admin.pubkey(), 0),
+        ] {
+            put_token(&mut self.vm, key, mint, owner, amount);
+            let mut account = self.vm.get_account(&key).unwrap();
+            account.owner = self.token_program;
+            self.vm.set_account(key, account).unwrap();
+        }
+        self.new_epoch(0);
+    }
+}
+
+#[test]
+#[ignore = "requires compiled SBF program"]
+fn r2_zero_income_early_resolution_inherits_cutoff_and_completed_cycle_rotates() {
+    for (label, holding, derivative) in [
+        ("holding-independent", true, false),
+        ("holding-derivative", true, true),
+        ("no-income-independent", false, false),
+        ("no-income-derivative", false, true),
+    ] {
+        let mut f = Fixture::new();
+        f.open_case();
+        let cutoff = f.read::<SimilarityCase>(f.review.unwrap()).cutoff;
+        assert_eq!(cutoff, START + 7 * DAY);
+        if holding {
+            f.at(DAY);
+            f.tip(1000);
+            assert_eq!(f.read::<RevenueEpoch>(f.epoch).deadline, cutoff);
+        }
+        let holding_epoch = f.epoch;
+        f.at(3 * DAY);
+        if derivative {
+            f.derivative(7000);
+        } else {
+            f.independent();
+        }
+        f.new_epoch(0);
+        f.tip(100);
+        let new_deadline = f.read::<RevenueEpoch>(f.epoch).deadline;
+        println!(
+            "R2 {label}: cutoff={cutoff}, new_deadline={new_deadline}, content_deadline={}",
+            f.read::<Content>(f.content).normal_deadline
+        );
+        assert_eq!(
+            new_deadline, cutoff,
+            "R2 {label}: early resolution cannot reset the unfinished content cycle"
+        );
+        if holding {
+            assert_eq!(f.read::<RevenueEpoch>(holding_epoch).deadline, cutoff);
+        }
+        f.claim(f.proof(), Who::Author, 1);
+        f.at(4 * DAY);
+        f.tip(100);
+        assert_eq!(f.read::<RevenueEpoch>(f.epoch).deadline, cutoff);
+        assert_eq!(f.read::<Content>(f.content).normal_deadline, cutoff);
+        f.at(8 * DAY);
+        f.rejects(f.tip_ix(1), &[Who::Buyer], ProtocolError::EpochClosed);
+        f.new_epoch(0);
+        f.tip(10);
+        assert_eq!(
+            f.read::<RevenueEpoch>(f.epoch).deadline,
+            START + 15 * DAY,
+            "completed cycle must permit a genuinely new seven-day cycle"
+        );
+        f.solvency();
+    }
+}
+
+#[test]
+#[ignore = "requires compiled SBF program"]
+fn r2_early_resolution_cross_node_mint_tip_sale_preserves_content_cutoff() {
+    for derivative in [false, true] {
+        let mut f = Fixture::new();
+        let legacy = (f.mint, f.asset, f.vault, f.epoch, f.funding);
+        f.approve_token2022();
+        let mut paid: Content = f.read(f.content);
+        paid.mode = 1;
+        paid.price = 100;
+        paid.price_mint = f.mint;
+        put(&mut f.vm, f.content, &paid);
+        f.open_case();
+        f.at(DAY);
+        let mut holding = f.economic();
+        holding.mint = legacy.0;
+        holding.asset = legacy.1;
+        holding.vault = legacy.2;
+        holding.epoch = legacy.3;
+        holding.source = legacy.4;
+        holding.token_program = spl_token::ID;
+        f.succeeds(
+            Instruction {
+                program_id: protocol::ID,
+                accounts: holding.to_account_metas(None),
+                data: instruction::Tip { amount: 100 }.data(),
+            },
+            &[Who::Buyer],
+        );
+        let cutoff = START + 7 * DAY;
+        assert_eq!(f.read::<RevenueEpoch>(legacy.3).deadline, cutoff);
+        f.at(3 * DAY);
+        if derivative {
+            f.derivative(7000);
+        } else {
+            f.independent();
+        }
+        let nonce = [49; 32];
+        let node = pda(&[
+            b"node",
+            f.content.as_ref(),
+            f.attacker.pubkey().as_ref(),
+            &nonce,
+        ]);
+        let args = RepostArgs {
+            nonce,
+            tip_root: merkle_pair(
+                payout_leaf(node, 0, 0, f.author.pubkey(), 7000),
+                payout_leaf(node, 0, 1, f.attacker.pubkey(), 3000),
+            ),
+            sale_root: merkle_pair(
+                payout_leaf(node, 1, 0, f.author.pubkey(), 8000),
+                payout_leaf(node, 1, 1, f.attacker.pubkey(), 2000),
+            ),
+            tip_child_bps: 0,
+            sale_child_bps: 0,
+            tip_residual_bps: 3000,
+            sale_residual_bps: 2000,
+            provenance_commitment: [19; 32],
+        };
+        f.succeeds(
+            Instruction {
+                program_id: protocol::ID,
+                accounts: accounts::RepostNode {
+                    creator: f.attacker.pubkey(),
+                    config: f.config,
+                    rights: f.rights.pubkey(),
+                    content: f.content,
+                    node,
+                    system_program: system_program::ID,
+                }
+                .to_account_metas(None),
+                data: instruction::CreateRepostNode { args }.data(),
+            },
+            &[Who::Attacker, Who::Rights],
+        );
+        f.node = node;
+        f.new_epoch(1);
+        let receipt = pda(&[b"access", f.content.as_ref(), f.buyer.pubkey().as_ref()]);
+        f.succeeds(
+            Instruction {
+                program_id: protocol::ID,
+                accounts: accounts::Purchase {
+                    buyer: f.buyer.pubkey(),
+                    economic: f.economic(),
+                    receipt,
+                    system_program: system_program::ID,
+                }
+                .to_account_metas(None),
+                data: instruction::PurchaseAccess {}.data(),
+            },
+            &[Who::Buyer],
+        );
+        let sale: RevenueEpoch = f.read(f.epoch);
+        println!("R2 cross-node/mint/kind derivative={derivative}: SPL TIP cutoff={cutoff}, Token-2022 SALE deadline={}", sale.deadline);
+        assert_eq!(
+            sale.deadline, cutoff,
+            "changing node, mint and revenue kind cannot reset an unfinished content cycle"
+        );
+        assert_eq!(f.balance(legacy.2), 100);
+        assert_eq!(f.read::<AssetPolicy>(legacy.1).user_liability, 100);
+        assert_eq!(f.balance(f.vault), 100);
+        assert_eq!(sale.kind, 1);
+        assert_eq!(f.read::<AccessReceipt>(receipt).content, f.content);
+        f.solvency();
+    }
+}
+
+impl Fixture {
+    fn custody_snapshot(&self, extra: &[Pubkey]) -> Vec<(Pubkey, Option<Account>)> {
+        let mut keys = vec![
+            self.content,
+            self.node,
+            self.epoch,
+            self.asset,
+            self.mint,
+            self.funding,
+            self.vault,
+            self.author_destination,
+            self.source_destination,
+            self.attacker_destination,
+            self.treasury_destination,
+        ];
+        keys.extend_from_slice(extra);
+        keys.into_iter()
+            .map(|key| (key, self.vm.get_account(&key)))
+            .collect()
+    }
+    fn assert_unchanged(&self, snapshot: &[(Pubkey, Option<Account>)]) {
+        for (key, before) in snapshot {
+            assert_eq!(
+                &self.vm.get_account(key),
+                before,
+                "failed transaction changed financial account {key}"
+            );
+        }
+    }
+    fn assert_token2022_ledger(
+        &self,
+        gross: u64,
+        paid: u64,
+        fees: u64,
+        liability: u64,
+        earned: u64,
+    ) {
+        assert_eq!(self.token_program, anchor_spl::token_2022::ID);
+        let epoch: RevenueEpoch = self.read(self.epoch);
+        let asset: AssetPolicy = self.read(self.asset);
+        assert_eq!((epoch.gross, epoch.paid, epoch.fees), (gross, paid, fees));
+        assert_eq!(
+            (asset.user_liability, asset.earned_fees),
+            (liability, earned)
+        );
+        assert_eq!(asset.token_program, self.token_program);
+        assert_eq!(
+            self.vm.get_account(&self.vault).unwrap().owner,
+            self.token_program
+        );
+        assert_eq!(self.balance(self.vault), liability + earned);
+        assert!(epoch.paid + epoch.fees <= epoch.gross);
+        let held: u128 = [
+            self.funding,
+            self.vault,
+            self.author_destination,
+            self.source_destination,
+            self.attacker_destination,
+            self.treasury_destination,
+        ]
+        .iter()
+        .map(|key| u128::from(self.balance(*key)))
+        .sum();
+        assert_eq!(
+            held, 1_000_000,
+            "Token-2022 source/vault/all recipients must conserve minted base units"
+        );
+        self.solvency();
+    }
+    fn purchase_ix(&self) -> Instruction {
+        Instruction {
+            program_id: protocol::ID,
+            accounts: accounts::Purchase {
+                buyer: self.buyer.pubkey(),
+                economic: self.economic(),
+                receipt: pda(&[
+                    b"access",
+                    self.content.as_ref(),
+                    self.buyer.pubkey().as_ref(),
+                ]),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::PurchaseAccess {}.data(),
+        }
+    }
+    fn fee_withdraw_ix(&self, destination: Pubkey, amount: u64) -> Instruction {
+        Instruction {
+            program_id: protocol::ID,
+            accounts: accounts::WithdrawFees {
+                admin: self.admin.pubkey(),
+                config: self.config,
+                asset: self.asset,
+                mint: self.mint,
+                vault: self.vault,
+                destination,
+                token_program: self.token_program,
+            }
+            .to_account_metas(None),
+            data: instruction::WithdrawProtocolFees { amount }.data(),
+        }
+    }
+}
+
+fn checked_token2022_transfer(logs: &[String]) {
+    let invocation = format!("Program {} invoke [2]", anchor_spl::token_2022::ID);
+    assert!(
+        logs.iter().any(|log| log.contains(&invocation)),
+        "real Token-2022 CPI missing: {logs:?}"
+    );
+    assert!(
+        logs.iter()
+            .any(|log| log.contains("Instruction: TransferChecked")),
+        "checked transfer CPI missing: {logs:?}"
+    );
+}
+
+#[test]
+#[ignore = "requires compiled SBF program"]
+fn r4_token2022_tip_purchase_claim_transfer_checked_and_atomic_failures() {
+    let mut f = Fixture::new();
+    let legacy_destination = f.author_destination;
+    f.approve_token2022();
+    let absent_positions = [
+        f.leaf_key(&f.proof()),
+        f.position_key(&f.proof(), Who::Author),
+    ];
+    // The instruction writes its prospective deadline before invoking Token-2022.
+    // Insufficient source tokens must roll back those writes and every balance.
+    let before = f.custody_snapshot(&absent_positions);
+    let failure = f
+        .send(f.tip_ix(1_000_001), &[Who::Buyer])
+        .expect_err("insufficient source funds must reject");
+    assert!(
+        failure.contains(&anchor_spl::token_2022::ID.to_string())
+            && failure.contains("Instruction: TransferChecked")
+    );
+    f.assert_unchanged(&before);
+    assert_eq!(f.read::<Content>(f.content).normal_deadline, 0);
+    assert_eq!(f.read::<RevenueEpoch>(f.epoch).deadline, 0);
+    f.assert_token2022_ledger(0, 0, 0, 0, 0);
+    let logs = f.send(f.tip_ix(1000), &[Who::Buyer]).unwrap();
+    checked_token2022_transfer(&logs);
+    assert_eq!(f.balance(f.funding), 999_000);
+    assert_eq!(f.balance(f.vault), 1000);
+    f.assert_token2022_ledger(1000, 0, 0, 1000, 0);
+    for (destination, token_program) in [
+        (legacy_destination, f.token_program),
+        (f.source_destination, f.token_program),
+        (f.author_destination, spl_token::ID),
+    ] {
+        let before = f.custody_snapshot(&absent_positions);
+        let mut accounts = f.claim_accounts(&f.proof(), Who::Author);
+        accounts.destination = destination;
+        accounts.token_program = token_program;
+        assert!(f
+            .send(
+                Instruction {
+                    program_id: protocol::ID,
+                    accounts: accounts.to_account_metas(None),
+                    data: instruction::ClaimLiquid {
+                        proof: f.proof(),
+                        amount: 1
+                    }
+                    .data()
+                },
+                &[Who::Author]
+            )
+            .is_err());
+        f.assert_unchanged(&before);
+    }
+    let other_mint = Pubkey::new_unique();
+    put_mint(&mut f.vm, other_mint);
+    let mut mint_account = f.vm.get_account(&other_mint).unwrap();
+    mint_account.owner = f.token_program;
+    f.vm.set_account(other_mint, mint_account).unwrap();
+    let before = f.custody_snapshot(&absent_positions);
+    let mut wrong_mint = f.claim_accounts(&f.proof(), Who::Author);
+    wrong_mint.mint = other_mint;
+    assert!(f
+        .send(
+            Instruction {
+                program_id: protocol::ID,
+                accounts: wrong_mint.to_account_metas(None),
+                data: instruction::ClaimLiquid {
+                    proof: f.proof(),
+                    amount: 1
+                }
+                .data()
+            },
+            &[Who::Author]
+        )
+        .is_err());
+    f.assert_unchanged(&before);
+    let logs = f
+        .send(f.claim_ix(f.proof(), Who::Author, 400), &[Who::Author])
+        .unwrap();
+    checked_token2022_transfer(&logs);
+    assert_eq!(f.balance(f.author_destination), 400);
+    f.assert_token2022_ledger(1000, 400, 0, 600, 0);
+    let before = f.custody_snapshot(&absent_positions);
+    f.rejects(
+        f.claim_ix(f.proof(), Who::Author, 601),
+        &[Who::Author],
+        ProtocolError::PrincipalProtected,
+    );
+    f.assert_unchanged(&before);
+    let logs = f
+        .send(f.claim_ix(f.proof(), Who::Author, 600), &[Who::Author])
+        .unwrap();
+    checked_token2022_transfer(&logs);
+    assert_eq!(f.balance(f.author_destination), 1000);
+    f.assert_token2022_ledger(1000, 1000, 0, 0, 0);
+    let before = f.custody_snapshot(&absent_positions);
+    f.rejects(
+        f.claim_ix(f.proof(), Who::Author, 1),
+        &[Who::Author],
+        ProtocolError::PrincipalProtected,
+    );
+    f.assert_unchanged(&before);
+
+    // A distinct paid-content fixture starts with its approved price asset, so no
+    // production price mutation is required to exercise the SALE path.
+    let mut paid = Fixture::new();
+    paid.approve_token2022();
+    let mut content: Content = paid.read(paid.content);
+    content.mode = 1;
+    content.price = 100;
+    content.price_mint = paid.mint;
+    put(&mut paid.vm, paid.content, &content);
+    paid.new_epoch(1);
+    let receipt = pda(&[
+        b"access",
+        paid.content.as_ref(),
+        paid.buyer.pubkey().as_ref(),
+    ]);
+    let logs = paid.send(paid.purchase_ix(), &[Who::Buyer]).unwrap();
+    checked_token2022_transfer(&logs);
+    let access: AccessReceipt = paid.read(receipt);
+    assert_eq!(access.content, paid.content);
+    assert_eq!(access.buyer, paid.buyer.pubkey());
+    assert_eq!(access.mint, paid.mint);
+    assert_eq!(paid.balance(paid.funding), 999_900);
+    paid.assert_token2022_ledger(100, 0, 0, 100, 0);
+    let logs = paid
+        .send(
+            paid.claim_ix(paid.proof(), Who::Author, 100),
+            &[Who::Author],
+        )
+        .unwrap();
+    checked_token2022_transfer(&logs);
+    assert_eq!(paid.balance(paid.author_destination), 100);
+    paid.assert_token2022_ledger(100, 100, 0, 0, 0);
+    let before = paid.custody_snapshot(&[receipt]);
+    assert!(paid.send(paid.purchase_ix(), &[Who::Buyer]).is_err());
+    paid.assert_unchanged(&before);
+    let nonce = [50; 32];
+    let node = pda(&[
+        b"node",
+        paid.content.as_ref(),
+        paid.attacker.pubkey().as_ref(),
+        &nonce,
+    ]);
+    let args = RepostArgs {
+        nonce,
+        tip_root: merkle_pair(
+            payout_leaf(node, 0, 0, paid.author.pubkey(), 7000),
+            payout_leaf(node, 0, 1, paid.attacker.pubkey(), 3000),
+        ),
+        sale_root: merkle_pair(
+            payout_leaf(node, 1, 0, paid.author.pubkey(), 8000),
+            payout_leaf(node, 1, 1, paid.attacker.pubkey(), 2000),
+        ),
+        tip_child_bps: 0,
+        sale_child_bps: 0,
+        tip_residual_bps: 3000,
+        sale_residual_bps: 2000,
+        provenance_commitment: [20; 32],
+    };
+    paid.succeeds(
+        Instruction {
+            program_id: protocol::ID,
+            accounts: accounts::RepostNode {
+                creator: paid.attacker.pubkey(),
+                config: paid.config,
+                rights: paid.rights.pubkey(),
+                content: paid.content,
+                node,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: instruction::CreateRepostNode { args }.data(),
+        },
+        &[Who::Attacker, Who::Rights],
+    );
+    paid.node = node;
+    paid.new_epoch(1);
+    let before = paid.custody_snapshot(&[receipt]);
+    assert!(paid.send(paid.purchase_ix(), &[Who::Buyer]).is_err());
+    paid.assert_unchanged(&before);
+    assert_ne!(paid.read::<AccessReceipt>(receipt).purchase_node, paid.node);
+    paid.assert_token2022_ledger(0, 0, 0, 0, 0);
+}
+
+#[test]
+#[ignore = "requires compiled SBF program"]
+fn r4_token2022_derivative_claims_and_earned_fee_withdrawals_conserve_liabilities() {
+    let mut f = Fixture::new();
+    f.approve_token2022();
+    f.open_case();
+    let logs = f.send(f.tip_ix(10_000), &[Who::Buyer]).unwrap();
+    checked_token2022_transfer(&logs);
+    f.assert_token2022_ledger(10_000, 0, 0, 10_000, 0);
+    let proof_accounts = [
+        f.leaf_key(&f.proof()),
+        f.position_key(&f.proof(), Who::Author),
+        f.position_key(&f.proof(), Who::Source),
+    ];
+    let before = f.custody_snapshot(&proof_accounts);
+    f.rejects(
+        f.fee_withdraw_ix(f.treasury_destination, 1),
+        &[Who::Admin],
+        ProtocolError::PrincipalProtected,
+    );
+    f.assert_unchanged(&before);
+    f.rejects(
+        f.claim_ix(f.proof(), Who::Author, 1),
+        &[Who::Author],
+        ProtocolError::DisputeStillActive,
+    );
+    f.assert_unchanged(&before);
+    f.at(DAY);
+    f.derivative(7000);
+    let logs = f
+        .send(f.claim_ix(f.proof(), Who::Source, 6650), &[Who::Source])
+        .unwrap();
+    checked_token2022_transfer(&logs);
+    assert_eq!(f.balance(f.source_destination), 6650);
+    f.assert_token2022_ledger(10_000, 6650, 500, 2850, 500);
+    let logs = f
+        .send(f.claim_ix(f.proof(), Who::Author, 2850), &[Who::Author])
+        .unwrap();
+    checked_token2022_transfer(&logs);
+    assert_eq!(f.balance(f.author_destination), 2850);
+    f.assert_token2022_ledger(10_000, 9500, 500, 0, 500);
+    let before = f.custody_snapshot(&proof_accounts);
+    f.rejects(
+        f.claim_ix(f.proof(), Who::Source, 1),
+        &[Who::Source],
+        ProtocolError::PrincipalProtected,
+    );
+    f.assert_unchanged(&before);
+    f.rejects(
+        f.fee_withdraw_ix(f.treasury_destination, 501),
+        &[Who::Admin],
+        ProtocolError::PrincipalProtected,
+    );
+    f.assert_unchanged(&before);
+    assert!(f
+        .send(
+            f.fee_withdraw_ix(f.attacker_destination, 500),
+            &[Who::Admin]
+        )
+        .is_err());
+    f.assert_unchanged(&before);
+    let logs = f
+        .send(
+            f.fee_withdraw_ix(f.treasury_destination, 500),
+            &[Who::Admin],
+        )
+        .unwrap();
+    checked_token2022_transfer(&logs);
+    assert_eq!(f.balance(f.treasury_destination), 500);
+    f.assert_token2022_ledger(10_000, 9500, 500, 0, 0);
+    let before = f.custody_snapshot(&proof_accounts);
+    f.rejects(
+        f.fee_withdraw_ix(f.treasury_destination, 1),
+        &[Who::Admin],
+        ProtocolError::PrincipalProtected,
+    );
+    f.assert_unchanged(&before);
+}
+
+#[test]
+#[ignore = "requires compiled SBF program"]
+fn r4_token2022_safeguard_partial_exit_checks_cooldown_balance_and_rollback() {
+    let mut f = Fixture::new();
+    f.approve_token2022();
+    let logs = f.send(f.tip_ix(1000), &[Who::Buyer]).unwrap();
+    checked_token2022_transfer(&logs);
+    f.assert_token2022_ledger(1000, 0, 0, 1000, 0);
+    f.at(8 * DAY);
+    let proof_accounts = [
+        f.leaf_key(&f.proof()),
+        f.position_key(&f.proof(), Who::Author),
+    ];
+    let before = f.custody_snapshot(&proof_accounts);
+    f.rejects(
+        f.claim_ix(f.proof(), Who::Author, 1),
+        &[Who::Author],
+        ProtocolError::SafeguardExitRequired,
+    );
+    f.assert_unchanged(&before);
+    f.rejects(
+        f.exit_ix(f.proof(), Who::Author, 1001),
+        &[Who::Author],
+        ProtocolError::InsufficientBalance,
+    );
+    f.assert_unchanged(&before);
+    f.succeeds(f.exit_ix(f.proof(), Who::Author, 400), &[Who::Author]);
+    f.assert_token2022_ledger(1000, 0, 0, 1000, 0);
+    let before = f.custody_snapshot(&proof_accounts);
+    f.at(10 * DAY - 1);
+    f.rejects(
+        f.claim_ix(f.proof(), Who::Author, 1),
+        &[Who::Author],
+        ProtocolError::ExitCooldownActive,
+    );
+    f.assert_unchanged(&before);
+    f.at(10 * DAY);
+    let logs = f
+        .send(f.claim_ix(f.proof(), Who::Author, 100), &[Who::Author])
+        .unwrap();
+    checked_token2022_transfer(&logs);
+    f.assert_token2022_ledger(1000, 100, 0, 900, 0);
+    let position: ClaimPosition = f.read(f.position_key(&f.proof(), Who::Author));
+    assert_eq!(
+        (position.exit_requested_at, position.exit_amount),
+        (START + 8 * DAY, 300)
+    );
+    let before = f.custody_snapshot(&proof_accounts);
+    f.rejects(
+        f.exit_ix(f.proof(), Who::Author, 1),
+        &[Who::Author],
+        ProtocolError::ExitAlreadyPending,
+    );
+    f.assert_unchanged(&before);
+    f.rejects(
+        f.claim_ix(f.proof(), Who::Author, 301),
+        &[Who::Author],
+        ProtocolError::InsufficientBalance,
+    );
+    f.assert_unchanged(&before);
+    let logs = f
+        .send(f.claim_ix(f.proof(), Who::Author, 300), &[Who::Author])
+        .unwrap();
+    checked_token2022_transfer(&logs);
+    f.assert_token2022_ledger(1000, 400, 0, 600, 0);
+    f.succeeds(f.exit_ix(f.proof(), Who::Author, 600), &[Who::Author]);
+    f.at(12 * DAY);
+    let logs = f
+        .send(f.claim_ix(f.proof(), Who::Author, 600), &[Who::Author])
+        .unwrap();
+    checked_token2022_transfer(&logs);
+    assert_eq!(f.balance(f.author_destination), 1000);
+    assert_eq!(f.balance(f.funding), 999_000);
+    f.assert_token2022_ledger(1000, 1000, 0, 0, 0);
+    let before = f.custody_snapshot(&proof_accounts);
+    f.rejects(
+        f.claim_ix(f.proof(), Who::Author, 1),
+        &[Who::Author],
+        ProtocolError::PrincipalProtected,
+    );
+    f.assert_unchanged(&before);
 }

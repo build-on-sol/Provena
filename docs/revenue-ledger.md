@@ -14,7 +14,7 @@ Normal entitlement is floor(epoch gross * leaf bps / 10000). A partial claim inc
 
 Case cutoff is min(dispute start + 7 days, existing normal deadline), including an already elapsed deadline. No revenue is needed for this clock. Every epoch of unresolved content is locked logically by Case state. At or after cutoff its unclaimed principal is safeguarded, whether or not a keeper has materialized the transition. Later deposits enter that same holding/safeguard state; they cannot create a new liquid window.
 
-Resolution closes pre-resolution epochs to further deposits. Before cutoff, Independent restores the inherited deadline. After cutoff, either resolution automatically starts an exit for each beneficiary's remaining allocation, anchored to the case's resolution timestamp. A later proof submission cannot delay or restart this clock. A new post-resolution epoch follows normal revenue policy.
+Opening a case also records its effective cutoff in the existing Content normal deadline, even with zero income. Resolution closes pre-resolution epochs to further deposits. Before cutoff, Independent and Derivative retain that content-cycle deadline; the first post-resolution income and other nodes/assets/TIP/SALE inherit its remaining time. Only after the old cutoff has elapsed can a new post-resolution epoch begin a fresh normal cycle. After cutoff, either resolution automatically starts an exit for each beneficiary's remaining allocation, anchored to the case's resolution timestamp. A later proof submission cannot delay or restart this clock.
 
 ## Settlement and partial claims
 

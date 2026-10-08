@@ -2,7 +2,8 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { PublicKey } from '@solana/web3.js';
 import { CitationReference, CitationSource, hashContent, sha256, QuotePolicy, validateCitationManifest, VerifiedCitationManifest } from '../../packages/canonicalization/src';
 import { canonicalJson, walletKey } from '../auth';
-import { LocalStore, requireCondition } from '../store';
+import { ContentIdentityReader } from '../chain';
+import { LocalStore, requireCondition, ServiceError } from '../store';
 
 export interface CipherBlob { readonly algorithm: 'AES-256-GCM'; readonly iv: string; readonly tag: string; readonly ciphertext: string; }
 export interface ContentArtifact {
@@ -20,6 +21,8 @@ export interface ContentArtifact {
   readonly storageCommitment: string;
   readonly metadataCommitment: string;
   readonly stagedAt: number;
+  /** Missing in legacy stores means PENDING; labels never establish chain ownership. */
+  readonly lifecycle?: 'PENDING' | 'CONFIRMED';
   readonly plaintext?: string;
   readonly blob?: CipherBlob;
   readonly wrappedKey?: CipherBlob;
@@ -49,7 +52,7 @@ export function decryptBlob(blob: CipherBlob, key: Buffer, associatedData: strin
   return Buffer.concat([cipher.update(Buffer.from(blob.ciphertext, 'base64')), cipher.final()]);
 }
 export class ContentService {
-  constructor(readonly store: LocalStore, readonly programId: PublicKey, private readonly receiptVerifier: ReceiptVerifier, private readonly masterKey?: Buffer, private readonly now = Date.now) {
+  constructor(readonly store: LocalStore, readonly programId: PublicKey, private readonly receiptVerifier: ReceiptVerifier, private readonly masterKey?: Buffer, private readonly now = Date.now, private readonly identityReader?: ContentIdentityReader) {
     requireCondition(masterKey === undefined || masterKey.length === 32, 'InvalidMasterKey');
   }
   get(id: string): ContentArtifact {
@@ -60,7 +63,7 @@ export class ContentService {
   }
   publicArtifact(id: string): Omit<ContentArtifact, 'wrappedKey'> {
     const { wrappedKey: _privateKey, ...artifact } = this.get(id);
-    return artifact;
+    return { ...artifact, lifecycle: artifact.lifecycle ?? 'PENDING' };
   }
   privateKey(artifact: ContentArtifact): Buffer {
     requireCondition(this.masterKey, 'KeyServiceUnconfigured', 503);
@@ -81,6 +84,11 @@ export class ContentService {
     const hashes = hashContent(input.body);
     const [contentKey] = PublicKey.findProgramAddressSync([Buffer.from('content'), walletKey(author).toBuffer(), Buffer.from(hashes.rawHash, 'hex')], this.programId);
     const id = contentKey.toBase58();
+    // Drafts do not reserve a global identity. Only the finalized registry can reject it.
+    if (this.identityReader) {
+      try { requireCondition(await this.identityReader.readFingerprint(hashes.canonicalHash) === null, 'DuplicateContent', 409); }
+      catch (error) { if (error instanceof ServiceError) throw error; throw new ServiceError('ContentIdentityVerifierUnavailable', 503); }
+    }
     const references = input.citations ?? [];
     requireCondition(Array.isArray(references) && references.length <= 64, 'InvalidCitationManifest');
     requireCondition(references.every(reference => reference !== null && typeof reference === 'object' && typeof reference.sourceContentId === 'string' && typeof reference.sourceAuthor === 'string' && typeof reference.citingContentId === 'string' && typeof reference.excerpt === 'string' && Array.isArray(reference.sourceSegments) && reference.sourceSegments.every((segment: unknown) => segment !== null && typeof segment === 'object')), 'InvalidCitationManifest');
@@ -96,12 +104,32 @@ export class ContentService {
       const dataKey = randomBytes(32);
       payload = { blob: seal(Buffer.from(input.body), dataKey, `provena:body:v1:${id}`), wrappedKey: seal(dataKey, this.masterKey, `provena:key:v1:${id}`) };
     } else payload = { plaintext: input.body };
-    const artifact: ContentArtifact = { id, author, mode: input.mode, ...metadata, rawHash: hashes.rawHash, canonicalHash: hashes.canonicalHash, canonicalizationVersion: 1, citationManifest, ...payload, storageCommitment: sha256(input.mode === 'PUBLIC' ? Buffer.from(input.body) : canonicalJson(payload.blob)), metadataCommitment: sha256(canonicalJson(metadata)), stagedAt: this.now() };
+    const artifact: ContentArtifact = { id, author, mode: input.mode, ...metadata, rawHash: hashes.rawHash, canonicalHash: hashes.canonicalHash, canonicalizationVersion: 1, citationManifest, ...payload, storageCommitment: sha256(input.mode === 'PUBLIC' ? Buffer.from(input.body) : canonicalJson(payload.blob)), metadataCommitment: sha256(canonicalJson(metadata)), stagedAt: this.now(), lifecycle: 'PENDING' };
     await this.store.transact(state => {
-      requireCondition(!Object.hasOwn(state.fingerprints, hashes.canonicalHash), 'DuplicateContent', 409);
       requireCondition(!Object.hasOwn(state.content, id), 'ContentAlreadyStaged', 409);
       state.content[id] = artifact;
-      state.fingerprints[hashes.canonicalHash] = id;
+    });
+    return this.publicArtifact(id);
+  }
+  async confirm(requester: string, id: string): Promise<Omit<ContentArtifact, 'wrappedKey'>> {
+    const artifact = this.get(id);
+    requireCondition(requester === artifact.author, 'Unauthorized', 403);
+    requireCondition(this.identityReader, 'ContentIdentityVerifierUnconfigured', 503);
+    try {
+      const identity = await this.identityReader.readContent(id);
+      const fingerprint = await this.identityReader.readFingerprint(artifact.canonicalHash);
+      requireCondition(identity && fingerprint && fingerprint.content === id && fingerprint.canonicalHash === artifact.canonicalHash, 'ContentNotConfirmed', 409);
+      requireCondition(identity.id === id && identity.author === artifact.author && identity.rawHash === artifact.rawHash && identity.canonicalHash === artifact.canonicalHash && identity.canonicalizationVersion === artifact.canonicalizationVersion && identity.mode === artifact.mode && identity.quotePolicy === artifact.quotePolicy && identity.storageCommitment === artifact.storageCommitment && identity.metadataCommitment === artifact.metadataCommitment && identity.citationManifestCommitment === artifact.citationManifest.commitment, 'ChainContentMismatch', 409);
+    } catch (error) {
+      if (error instanceof ServiceError) throw error;
+      throw new ServiceError('ContentIdentityVerifierUnavailable', 503);
+    }
+    await this.store.transact(state => {
+      const current = state.content[id] as ContentArtifact;
+      requireCondition(canonicalJson(current) === canonicalJson(artifact), 'ContentArtifactChanged', 409);
+      // Confirmation changes only the local status, never signed commitments or key material.
+      state.content[id] = { ...current, lifecycle: 'CONFIRMED' };
+      state.fingerprints[artifact.canonicalHash] = id;
     });
     return this.publicArtifact(id);
   }
@@ -115,10 +143,10 @@ export class ContentService {
     requireCondition(allowed, 'AccessReceiptRequired', 403);
     return { key: this.privateKey(artifact).toString('base64'), associatedData: `provena:body:v1:${id}` };
   }
-  originalityRisk(body: string): { exactDuplicate: string | null; potentialSources: string[]; assessment: 'EXACT_DUPLICATE' | 'POTENTIAL_SIMILAR' | 'NO_MOCK_SIGNAL'; model: 'deterministic-mock-v1' } {
+  originalityRisk(body: string): { exactDuplicate: string | null; potentialSources: string[]; assessment: 'EXACT_DUPLICATE' | 'POTENTIAL_SIMILAR' | 'NO_MOCK_SIGNAL'; model: 'deterministic-mock-v1'; scope: 'OFFCHAIN_RISK_ONLY'; approved: false } {
     const hash = hashContent(body);
     const state = this.store.snapshot();
-    const exactDuplicate = state.fingerprints[hash.canonicalHash] ?? null;
+    const exactDuplicate = (Object.values(state.content) as ContentArtifact[]).filter(artifact => artifact.canonicalHash === hash.canonicalHash).map(artifact => artifact.id).sort()[0] ?? null;
     const grams = (text: string): Set<string> => { const units = Array.from(hashContent(text).canonicalBody); return new Set(units.slice(0, -3).map((_, index) => units.slice(index, index + 4).join(''))); };
     const candidate = grams(body);
     const potentialSources: string[] = [];
@@ -130,6 +158,6 @@ export class ContentService {
       const overlap = [...candidate].filter(gram => sourceGrams.has(gram)).length;
       if (union > 0 && overlap * 100 >= union * 70) potentialSources.push(source.id);
     }
-    return { exactDuplicate, potentialSources: potentialSources.sort(), assessment: exactDuplicate ? 'EXACT_DUPLICATE' : potentialSources.length ? 'POTENTIAL_SIMILAR' : 'NO_MOCK_SIGNAL', model: 'deterministic-mock-v1' };
+    return { exactDuplicate, potentialSources: potentialSources.sort(), assessment: exactDuplicate ? 'EXACT_DUPLICATE' : potentialSources.length ? 'POTENTIAL_SIMILAR' : 'NO_MOCK_SIGNAL', model: 'deterministic-mock-v1', scope: 'OFFCHAIN_RISK_ONLY', approved: false };
   }
 }

@@ -496,6 +496,10 @@ pub mod content_rights_protocol {
                 Some(c.normal_deadline)
             },
         )?;
+        // The case starts a fixed content cycle even before the first revenue.
+        // Early resolution must inherit its remaining grace; normal deposits
+        // may rotate this existing clock only after the cutoff has elapsed.
+        c.normal_deadline = cutoff;
         ctx.accounts.case.set_inner(SimilarityCase {
             version: 1,
             candidate: c.key(),

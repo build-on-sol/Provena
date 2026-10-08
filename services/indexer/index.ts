@@ -1,6 +1,6 @@
 import { Connection, PublicKey } from '@solana/web3.js';
-import { BorshCoder, EventParser, Idl } from '@coral-xyz/anchor';
-import { LocalStore, requireCondition } from '../store';
+import { BorshCoder, Idl } from '@coral-xyz/anchor';
+import { LocalStore, requireCondition, ServiceError } from '../store';
 
 const fields: Record<string, readonly string[]> = {
   ContentSubmitted: ['content', 'author', 'rawHash'], ContentApproved: ['content'],
@@ -15,8 +15,23 @@ export interface IndexedEvent { signature: string; slot: number; index: number; 
 interface ContentProjection { content: string; author: string; status: string; }
 export interface CaseProjection { id: string; candidate: string; reference: string; candidateAuthor: string | null; referenceAuthor: string | null; cutoff: string; status: string; }
 export interface ReviewMessage { wallet: string; timestamp: number; text: string; evidenceCommitment?: string; signature: string; nonce: string; }
+export interface IndexerSyncStatus {
+  status: 'NOT_STARTED' | 'SYNCING' | 'SYNCED' | 'ERROR';
+  checkpoint: string | null;
+  lastSuccessfulPollAt: number | null;
+  error: { code: string; signature: string | null } | null;
+}
 export class EventIndexer {
+  private synchronization: Omit<IndexerSyncStatus, 'checkpoint'> = { status: 'NOT_STARTED', lastSuccessfulPollAt: null, error: null };
   constructor(readonly store: LocalStore) {}
+  /** A persisted checkpoint alone does not establish synchronization after restart. */
+  syncStatus(): IndexerSyncStatus { return { ...structuredClone(this.synchronization), checkpoint: this.store.snapshot().checkpoint }; }
+  beginSync(): void { this.synchronization.status = 'SYNCING'; this.synchronization.error = null; }
+  completeSync(): void { this.synchronization = { status: 'SYNCED', lastSuccessfulPollAt: Date.now(), error: null }; }
+  failSync(error: unknown, signature: string | null): void {
+    const code = error instanceof ServiceError ? error.code : (error as { code?: unknown })?.code === -32015 ? 'UnsupportedTransactionVersion' : 'ChainRpcReadFailed';
+    this.synchronization.status = 'ERROR'; this.synchronization.error = { code, signature };
+  }
   /** Trusted internal ingestion only. No HTTP endpoint accepts financial events. */
   async ingest(events: readonly IndexedEvent[], checkpoint?: string): Promise<void> {
     await this.store.transact(state => {
@@ -57,7 +72,7 @@ export class EventIndexer {
     return { content, cases };
   }
   feed(): ContentProjection[] { return [...this.projection().content.values()]; }
-  metrics(content: string): { likes: number; unlikes: number; views: number; revenueByAsset: Record<string, { tip: string; sale: string }>; paidBeneficiaryCount: null; beneficiaryCountStatus: 'NEEDS_VERIFIED_ENTITLEMENTS'; source: 'FINALIZED_CHAIN_EVENTS_AND_SIGNED_SOCIAL_STATE' } {
+  metrics(content: string): { likes: number; unlikes: number; views: number; revenueByAsset: Record<string, { tip: string; sale: string }>; paidBeneficiaryCount: null; beneficiaryCountStatus: 'NEEDS_VERIFIED_ENTITLEMENTS'; source: 'FINALIZED_CHAIN_EVENTS_AND_SIGNED_SOCIAL_STATE'; indexerSync: IndexerSyncStatus } {
     const state = this.store.snapshot();
     const reactions = Object.values(state.reactions[content] ?? {});
     const revenue = new Map<string, { tip: bigint; sale: bigint }>();
@@ -68,7 +83,7 @@ export class EventIndexer {
       if (event.name === 'TipReceived') current.tip += BigInt(event.data.amount!); else current.sale += BigInt(event.data.amount!);
       revenue.set(asset, current);
     }
-    return { likes: reactions.filter(value => value === 'LIKE').length, unlikes: reactions.filter(value => value === 'UNLIKE').length, views: state.views[content] ?? 0, revenueByAsset: Object.fromEntries([...revenue].map(([asset, value]) => [asset, { tip: String(value.tip), sale: String(value.sale) }])), paidBeneficiaryCount: null, beneficiaryCountStatus: 'NEEDS_VERIFIED_ENTITLEMENTS', source: 'FINALIZED_CHAIN_EVENTS_AND_SIGNED_SOCIAL_STATE' };
+    return { likes: reactions.filter(value => value === 'LIKE').length, unlikes: reactions.filter(value => value === 'UNLIKE').length, views: state.views[content] ?? 0, revenueByAsset: Object.fromEntries([...revenue].map(([asset, value]) => [asset, { tip: String(value.tip), sale: String(value.sale) }])), paidBeneficiaryCount: null, beneficiaryCountStatus: 'NEEDS_VERIFIED_ENTITLEMENTS', source: 'FINALIZED_CHAIN_EVENTS_AND_SIGNED_SOCIAL_STATE', indexerSync: this.syncStatus() };
   }
   async react(wallet: string, content: string, value: 'LIKE' | 'UNLIKE' | 'VIEW' | 'CLEAR'): Promise<void> {
     requireCondition(this.projection().content.has(content), 'ChainContentNotIndexed', 404);
@@ -95,10 +110,10 @@ export class EventIndexer {
   thread(wallet: string, caseId: string): { similarity: CaseProjection; messages: readonly ReviewMessage[] } {
     return { similarity: this.caseForParticipant(wallet, caseId), messages: (this.store.snapshot().messages[caseId] ?? []) as ReviewMessage[] };
   }
-  claimDashboard(wallet: string): { wallet: string; claimedByEpoch: Record<string, string>; source: 'FINALIZED_CHAIN_EVENTS'; balances: null; instruction: string } {
+  claimDashboard(wallet: string): { wallet: string; claimedByEpoch: Record<string, string>; source: 'FINALIZED_CHAIN_EVENTS'; balances: null; instruction: string; indexerSync: IndexerSyncStatus } {
     const amounts = new Map<string, bigint>();
     for (const event of this.events()) if (event.name === 'RevenueClaimed' && event.data.beneficiary === wallet) amounts.set(event.data.epoch!, (amounts.get(event.data.epoch!) ?? 0n) + BigInt(event.data.amount!));
-    return { wallet, claimedByEpoch: Object.fromEntries([...amounts].map(([key, value]) => [key, String(value)])), source: 'FINALIZED_CHAIN_EVENTS', balances: null, instruction: 'Read chain RevenueEpoch, LeafPosition and ClaimPosition accounts before constructing a claim; this dashboard cannot authorize withdrawals.' };
+    return { wallet, claimedByEpoch: Object.fromEntries([...amounts].map(([key, value]) => [key, String(value)])), source: 'FINALIZED_CHAIN_EVENTS', balances: null, instruction: 'Read chain RevenueEpoch, LeafPosition and ClaimPosition accounts before constructing a claim; this dashboard cannot authorize withdrawals.', indexerSync: this.syncStatus() };
   }
 }
 function eventValue(value: unknown): string {
@@ -106,39 +121,116 @@ function eventValue(value: unknown): string {
   requireCondition(value !== null && value !== undefined, 'InvalidChainEventValue');
   return String(value);
 }
-/** Reads finalized program logs; does not submit instructions or mutate any chain account. */
+/** Reads finalized program logs; never submits instructions or decides financial ownership.
+ * web3.js 1.99.0 supplies real MessageV1 reads. Anchor's existing Borsh coder
+ * decodes events independently of message versions; framing is checked here to
+ * retain CPI attribution and reject unknown/truncated logs without losing events.
+ */
 export class RpcEventPoller {
-  private readonly parser: EventParser;
+  private readonly coder: BorshCoder;
+  private running: Promise<number> | null = null;
   constructor(private readonly connection: Connection, private readonly programId: PublicKey, idl: Idl, private readonly indexer: EventIndexer) {
     requireCondition(idl.address === programId.toBase58(), 'IdlProgramMismatch');
-    this.parser = new EventParser(programId, new BorshCoder(idl));
+    this.coder = new BorshCoder(idl);
   }
   async pollOnce(): Promise<number> {
-    const checkpoint = this.indexer.store.snapshot().checkpoint;
-    const signatures: Awaited<ReturnType<Connection['getSignaturesForAddress']>> = [];
-    let before: string | undefined;
-    while (true) {
-      const page = await this.connection.getSignaturesForAddress(this.programId, { ...(before ? { before } : {}), ...(checkpoint ? { until: checkpoint } : {}), limit: 1000 }, 'finalized');
-      signatures.push(...page);
-      if (page.length < 1000) break;
-      before = page[page.length - 1]!.signature;
-    }
-    for (const signature of [...signatures].reverse()) {
-      if (signature.err) continue;
-      const transaction = await this.connection.getTransaction(signature.signature, { commitment: 'finalized', maxSupportedTransactionVersion: 0 });
-      requireCondition(transaction !== null && transaction.meta !== null, 'ChainTransactionUnavailable', 503);
-      if (transaction.meta.err !== null) continue;
-      const events: IndexedEvent[] = [];
-      let index = 0;
-      for (const event of this.parser.parseLogs(transaction.meta.logMessages ?? [])) {
-        const name = Object.keys(fields).find(name => name.toLowerCase() === event.name.toLowerCase());
-        if (!name) { index++; continue; }
-        const data = event.data as Record<string, unknown>;
-        const values = Object.fromEntries(fields[name]!.map(field => [field, eventValue(data[field] ?? data[field.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)])]));
-        events.push({ signature: signature.signature, slot: signature.slot, index: index++, name, data: values });
+    if (this.running !== null) return this.running;
+    this.running = this.poll();
+    try { return await this.running; } finally { this.running = null; }
+  }
+  private async poll(): Promise<number> {
+    this.indexer.beginSync();
+    let processingSignature: string | null = null;
+    try {
+      const checkpoint = this.indexer.store.snapshot().checkpoint;
+      const signatures: Awaited<ReturnType<Connection['getSignaturesForAddress']>> = [];
+      const seen = new Set<string>();
+      let before: string | undefined;
+      while (true) {
+        const page = await this.connection.getSignaturesForAddress(this.programId, { ...(before ? { before } : {}), ...(checkpoint ? { until: checkpoint } : {}), limit: 1000 }, 'finalized');
+        for (const signature of page) {
+          requireCondition(/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(signature.signature) && Number.isSafeInteger(signature.slot) && signature.slot >= 0, 'InvalidChainSignature', 503);
+          // Historical RPCs may omit confirmationStatus; the finalized request
+          // remains authoritative. An explicit contradictory status is rejected.
+          requireCondition(signature.confirmationStatus == null || signature.confirmationStatus === 'finalized', 'UnfinalizedChainSignature', 503);
+          requireCondition(!seen.has(signature.signature) && signature.signature !== before && signature.signature !== checkpoint, 'IndexerPaginationDidNotAdvance', 503);
+          seen.add(signature.signature); signatures.push(signature);
+        }
+        if (page.length < 1000) break;
+        before = page[page.length - 1]!.signature;
       }
-      await this.indexer.ingest(events, signature.signature);
+      for (const signature of [...signatures].reverse()) {
+        processingSignature = signature.signature;
+        if (signature.err !== null) {
+          await this.indexer.ingest([], signature.signature);
+          continue;
+        }
+        const transaction = await this.connection.getTransaction(signature.signature, { commitment: 'finalized', maxSupportedTransactionVersion: 1 });
+        requireCondition(transaction !== null && transaction.meta !== null, 'ChainTransactionUnavailable', 503);
+        requireCondition(transaction.slot === signature.slot && transaction.transaction.signatures[0] === signature.signature, 'ChainTransactionMismatch', 503);
+        requireCondition(transaction.version === undefined || transaction.version === 'legacy' || transaction.version === 0 || transaction.version === 1, 'UnsupportedTransactionVersion', 503);
+        if (transaction.meta.err !== null) {
+          await this.indexer.ingest([], signature.signature);
+          continue;
+        }
+        requireCondition(Array.isArray(transaction.meta.logMessages), 'ChainTransactionLogsUnavailable', 503);
+        const message = transaction.transaction.message;
+        const keys = message.getAccountKeys(transaction.meta.loadedAddresses ? { accountKeysFromLookups: transaction.meta.loadedAddresses } : undefined);
+        const invoked = new Set<string>();
+        for (const instruction of [...message.compiledInstructions, ...(transaction.meta.innerInstructions ?? []).flatMap(group => group.instructions)]) {
+          requireCondition(Number.isSafeInteger(instruction.programIdIndex), 'InvalidChainProgramIndex', 503);
+          const program = keys.get(instruction.programIdIndex);
+          requireCondition(program, 'InvalidChainProgramIndex', 503);
+          invoked.add(program.toBase58());
+        }
+        const events = this.parseLogs(transaction.meta.logMessages, invoked, signature.signature, signature.slot);
+        // Events and checkpoint commit atomically. Failed reads, unknown formats,
+        // or incomplete logs never discard the unprocessed signature.
+        await this.indexer.ingest(events, signature.signature);
+      }
+      this.indexer.completeSync();
+      return signatures.length;
+    } catch (error) {
+      this.indexer.failSync(error, processingSignature);
+      throw error;
     }
-    return signatures.length;
+  }
+  private parseLogs(logs: readonly string[], invoked: ReadonlySet<string>, signature: string, slot: number): IndexedEvent[] {
+    const frames: Array<{ program: string; events: IndexedEvent[] }> = [];
+    const committed: IndexedEvent[] = [];
+    let index = 0;
+    let sawProtocol = false;
+    for (const log of logs) {
+      const invoke = /^Program ([1-9A-HJ-NP-Za-km-z]+) invoke \[(\d+)\]$/.exec(log);
+      if (invoke) {
+        const program = invoke[1]!;
+        requireCondition(Number(invoke[2]) === frames.length + 1 && invoked.has(program), 'InvalidChainInvocation', 503);
+        sawProtocol ||= program === this.programId.toBase58();
+        frames.push({ program, events: [] });
+        continue;
+      }
+      const finish = /^Program ([1-9A-HJ-NP-Za-km-z]+) (success|failed:.*)$/.exec(log);
+      if (finish) {
+        const frame = frames.pop();
+        requireCondition(frame && frame.program === finish[1], 'InvalidChainLogStack', 503);
+        if (finish[2] === 'success') (frames[frames.length - 1]?.events ?? committed).push(...frame.events);
+        // A failed CPI can be caught by its caller. Its events (and successful
+        // descendants' events) rolled back, even when the full tx succeeded.
+        continue;
+      }
+      if (frames[frames.length - 1]?.program !== this.programId.toBase58()) continue;
+      const encoded = log.startsWith('Program data: ') ? log.slice('Program data: '.length) : log.startsWith('Program log: ') ? log.slice('Program log: '.length) : null;
+      if (encoded === null) continue;
+      const event = this.coder.events.decode(encoded);
+      requireCondition(event !== null || !log.startsWith('Program data: '), 'UnknownChainEvent', 503);
+      if (event === null) continue; // Normal msg! text is not an Anchor event.
+      const name = Object.keys(fields).find(name => name.toLowerCase() === event.name.toLowerCase());
+      requireCondition(name, 'UnknownChainEvent', 503);
+      const data = event.data as Record<string, unknown>;
+      const values = Object.fromEntries(fields[name]!.map(field => [field, eventValue(data[field] ?? data[field.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)])]));
+      frames[frames.length - 1]!.events.push({ signature, slot, index: index++, name, data: values });
+    }
+    requireCondition(frames.length === 0 && (!invoked.has(this.programId.toBase58()) || sawProtocol), 'IncompleteChainLogs', 503);
+    return committed;
   }
 }

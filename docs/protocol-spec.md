@@ -56,6 +56,12 @@ Unresolved revenue is locked. Cutoff runs even at zero income, inherits elapsed 
 
 Canonical bodies, encrypted blobs, structured exact citation segments, private parent mappings, signed reactions, review messages and similarity evidence are offchain. Indexer projections are display/query state and cannot alter chain balances. Claiming directly through RPC/SDK remains possible when services are down. Paid beneficiary count is the count of distinct recipients with positive computed entitlement, not claim invocations; an unavailable complete vector must be marked unknown, never guessed.
 
+Signed staging creates a PENDING artifact and does not reserve another author's canonical fingerprint. Production staging consults the finalized global fingerprint registry. Signed `/content/confirm` is restricted to the artifact author and verifies the finalized Content identity and registry against the stored hashes, mode and commitments; confirmation preserves ciphertext and key bytes. Missing lifecycle in legacy stores means PENDING. The local originality result remains risk evidence, never approval.
+
+Full provenance reveal and full payout-vector responses require the existing node creator or configured Rights authority, a live finalized node matching the private commitment/roots, and `valueEvent: { epoch, nonce }`. The reader checks the program-owned RevenueEpoch PDA, content/node/mint/kind/nonce, payout root, accounting and positive gross from a successful deposit. A plan or cached confirmation alone cannot authorize disclosure. Without value-event evidence, `/provenance/proof` returns only the requesting beneficiary's own leaves and proofs. No new reading role or minimum payment is introduced.
+
+The indexer reads legacy/v0/v1 transactions with the pinned client and attributes events to completed Provena invocation frames. Unknown formats/events, missing logs and RPC failures preserve the unprocessed checkpoint and expose an ERROR synchronization state. Health, metrics and the claim dashboard report synchronization status; a checkpoint loaded after restart is NOT_STARTED until a complete finalized scan succeeds. Chain receipt and custody reads remain independent of this projection.
+
 ## Rounding and failures
 
 Per-vector dust is gross minus the sum of floor leaf entitlements; it is user liability and stays in the vault. Settlement fees floor per unpaid leaf and never confiscate dust. Exits and partial claims preserve recipient balance. There is no dust sweep or external strategy method.

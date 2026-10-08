@@ -3,8 +3,8 @@ import { PublicKey } from '@solana/web3.js';
 import { buildPayoutTree, deriveChildNodeRights, NodeRights, payoutVector, RevenueKind, RepostPolicy } from '../../packages/rights-math/src';
 import { provenanceCommitment, verifyProvenanceReveal, ProvenanceReveal } from '../../packages/protocol-sdk/src';
 import { AuthoritySigner, canonicalJson, walletKey } from '../auth';
-import { ChainNodeSnapshot, NodeReader } from '../chain';
-import { LocalStore, requireCondition } from '../store';
+import { ChainNodeSnapshot, NodeReader, ValueEventEvidence } from '../chain';
+import { LocalStore, requireCondition, ServiceError } from '../store';
 
 export interface PrivateNode {
   readonly node: string;
@@ -76,9 +76,21 @@ export class ProvenanceService {
     this.verifySnapshot(privateNode, await this.reader.readNode(node));
     await this.store.transact(state => { state.provenance[node] = { ...privateNode, state: 'CHAIN_VERIFIED' }; });
   }
-  reveal(requester: string, node: string): readonly ProvenanceReveal[] {
-    const tip = this.get(node);
+  private async authorizeDisclosure(requester: string, tip: PrivateNode, evidence?: ValueEventEvidence): Promise<void> {
     requireCondition(tip.creator === requester || requester === this.authority?.wallet, 'Unauthorized', 403);
+    requireCondition(evidence && typeof evidence.epoch === 'string' && typeof evidence.nonce === 'string', 'ValueEventRequired', 403);
+    requireCondition(this.reader.hasValueEvent, 'ValueEventVerifierUnconfigured', 503);
+    try {
+      this.verifySnapshot(tip, await this.reader.readNode(tip.node));
+      requireCondition(await this.reader.hasValueEvent(tip.node, tip.content, evidence), 'ValueEventRequired', 403);
+    } catch (error) {
+      if (error instanceof ServiceError) throw error;
+      throw new ServiceError('DisclosureVerifierUnavailable', 503);
+    }
+  }
+  async reveal(requester: string, node: string, evidence?: ValueEventEvidence): Promise<readonly ProvenanceReveal[]> {
+    const tip = this.get(node);
+    await this.authorizeDisclosure(requester, tip, evidence);
     const result: ProvenanceReveal[] = [];
     const visited = new Set<string>();
     let current = tip;
@@ -92,11 +104,14 @@ export class ProvenanceService {
     }
     return result;
   }
-  payoutProof(requester: string, node: string, kind: RevenueKind): { root: string; leaves: readonly { beneficiary: string; role: number; shareBps: number }[]; proofs: readonly (readonly string[])[] } {
+  async payoutProof(requester: string, node: string, kind: RevenueKind, evidence?: ValueEventEvidence): Promise<{ root: string; leaves: readonly { beneficiary: string; role: number; shareBps: number }[]; proofs: readonly (readonly string[])[] }> {
     const privateNode = this.get(node);
     // Beneficiaries need their own leaf/proof. Never publish the entire ancestry vector.
     const tree = buildPayoutTree(new PublicKey(node).toBuffer(), kind, payoutVector(kind === RevenueKind.Tip ? privateNode.rights.tip : privateNode.rights.sale));
-    if (requester === this.authority?.wallet || requester === privateNode.creator) return { root: tree.root, leaves: tree.leaves, proofs: tree.proofs };
+    if (evidence !== undefined) {
+      await this.authorizeDisclosure(requester, privateNode, evidence);
+      return { root: tree.root, leaves: tree.leaves, proofs: tree.proofs };
+    }
     const requesterHex = walletKey(requester).toBuffer().toString('hex');
     const indexes = tree.leaves.flatMap((leaf, index) => leaf.beneficiary === requesterHex ? [index] : []);
     requireCondition(indexes.length > 0, 'Unauthorized', 403);

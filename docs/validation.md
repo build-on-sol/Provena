@@ -2,6 +2,8 @@
 
 ## Baseline and scope
 
+This section and the original acceptance/corrective findings below are historical bootstrap records. Current audit-remediation provenance and actual results are in Final check results; historical statements alone are not current PASS evidence.
+
 Verified worktree: `/home/k5068/.codex/worktrees/c5e8/Provena`, branch `dev`, initial HEAD `a8f7e266cbae41e5954b42b09c33d75b1b22e6d7`. The initial checkout contained README, LICENSE and the V0 execution contract; there was no existing runtime, schema, migration, test suite or separate Engineering Handoff. No applicable filesystem AGENTS.md was present. The user's supplied repository execution instructions and the execution contract govern this implementation.
 
 Implementation follows the six V0 phases: Anchor account/authority skeleton; immutable content and distribution; integer token custody/claims/safeguard; content-scoped paid access; bilateral review settlement; minimal offchain services and SDK. The original execution contract and license are unchanged. This document records verified findings rather than changing the product contract.
@@ -67,4 +69,64 @@ Agave 2.3.0 post-processing with newer platform-tools v1.57 emits an undefined-s
 
 ## Final check results
 
-The final result counts and artifact verification are recorded here after the final integrated run.
+2026-10-08, Asia/Shanghai: the authorized R1–R6 remediation is complete at **READY_FOR_DEPLOYMENT_REVIEW**. This is a local verification result, not public-cluster deployment authorization or security certification. See [the executed Handoff](handoffs/v0.0.1-audit-remediation.md#7-codex-findings) for verified defects, failure-first evidence, boundaries and all 17 changed files.
+
+Execution repository/worktree: `build-on-sol/Provena`, `/home/k5068/.codex/worktrees/c5e8/Provena`; branch `chore/v0.0.1-audit-handoff`; starting/execution HEAD `db6dafe4115f5f002c7fc62dad29ca4fe8d7c726` plus the current corrective changes. No newer branch commits were found. The final delivery commit is the commit containing this record (`git log -1 --format=%H -- docs/validation.md`); the starting SHA is not its final SHA.
+
+Tooling actually used: Node 22.22.1/npm 9.2.0, TypeScript 5.9.2, host Rust/Cargo 1.99.0, Anchor Rust/TS 0.32.1, Agave CLI/validator 2.3.0, LiteSVM 0.7.1. SBF builds explicitly use tools v1.57 (actual solana rustc 1.95.0-dev); the cargo-build-sbf 2.3.0 bare version display reports its default v1.48/1.84.1 and does not describe this invocation. Anchor CLI was unavailable (the inventory's `command -v anchor` exited 1); the existing official IDL builder example succeeded without it. The locked minimal client change is web3.js 1.98.4→1.99.0 with required codecs/errors 5.5.1 and commander 14.0.2; Anchor, Rust dependencies and Agave were not upgraded. [Official v1 read support](https://github.com/solana-foundation/solana-web3.js/releases/tag/v1.99.0) and the actual Connection response-decoding regressions justify that change.
+
+Commands ran with repository-local Cargo/Rustup/Agave paths and `OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu`, `OPENSSL_INCLUDE_DIR=/usr/include`. All following logs are local ignored files under `.local-tools/audit-evidence/`; logs, keys, paid content, DBs and build artifacts are not committed. `final-gates.jsonl` records exact command, timestamp, exit and log path. No `npm run lint` exists or was run.
+
+| Actual command | Result / exit | Log file |
+|---|---|---|
+| `npm ci --ignore-scripts` | PASS / 0 | `final-npm-ci.log` |
+| `npm test` (includes tsc) | PASS / 0; 67 passed, 0 failed, 0 skipped | `final-npm-test.log` |
+| `npm audit` | PASS / 0; 0 vulnerabilities | `final-npm-audit.log` |
+| `cargo fmt --all --check` | PASS / 0 | `final-cargo-fmt.log` |
+| `cargo test --workspace` | PASS / 0; 27 host passed, 26 security ignored | `final-cargo-test.log` |
+| `npm run build:program` | PASS / 0; no stack errors; postprocess warnings reviewed below | `final-build-program.log` |
+| `npm run build:idl` | PASS / 0; 24 instructions, byte-identical baseline IDL | `final-build-idl.log` |
+| `npm run test:vm` | PASS / 0; 26 passed, 0 failed, 0 ignored using this round's SBF | `final-test-vm.log` |
+| `node --check scripts/setup-local.cjs` | PASS / 0 | `final-check-setup.log` |
+| `node --check scripts/sync-local-program.cjs` | PASS / 0 | `final-check-sync.log` |
+| `node --check scripts/initialize-local.cjs` | PASS / 0 | `final-check-init.log` |
+| `node --check tests/local-validator-smoke.cjs` | PASS / 0 | `final-check-smoke.log` |
+| `bash -n scripts/deploy-local.sh` | PASS / 0 | `final-check-deploy.log` |
+| `git diff --check` (also after documentation) | PASS / 0 | `final-diff-check.log` |
+| Isolated copy: `bash scripts/deploy-local.sh` | PASS / 0; actual loopback deployment/initialization | `local-deploy.log` |
+| Isolated copy: `node tests/local-validator-smoke.cjs` | PASS / 0; loader/roles + 4 economic paths, 2 receipt allow/deny pairs | `local-smoke.log` |
+
+The ordinary host command's 26 ignored tests are not custody PASS evidence; the explicit VM command ran every one. Regression evidence before/after the fix:
+
+| Finding | Before | After | Evidence |
+|---|---|---|---|
+| R1/R5 | 0 passed / 5 failed, exit1 | targeted 7/7, full service 18/18, exit0 | `R1-R5-before.log`, `R1-R5-after.log`, `R1-R5-service-suite.log` |
+| R2 | frozen baseline .so: 0/2, exit101, deadline D10 instead of D7 | 2/2, exit0, including both classifications, holding/no-income, node/mint/kind and expiry | `/tmp/provena-r2-before.log`, `/tmp/provena-r2-after.log` |
+| R3 | actual Connection against JSON-RPC: 1 passed / 9 failed, exit1 | 11/11, exit0; includes additional v0 ALT case | `R3-baseline-regression.log`, `R3-regression.log`, `R3-client-compatibility.log` |
+| R4 | original suite had no successful Token-2022 economic transfer coverage | 3/3 new actual SBF CPI tests, exit0; total VM 26/26 | `/tmp/provena-r4.log`, `final-test-vm.log` |
+
+R4 verifies TransferChecked invocation, source/vault/destination balances and epoch/asset conservation for tip/claim, purchase/receipt/claim, bilateral Derivative (6650 source + 2850 candidate + 500 fees), capped treasury withdrawal and partial safeguard exits at 48h. Wrong program/mint/destination, replay, insufficient-funds CPI and premature/oversized withdrawals assert account snapshots unchanged. Existing SPL, freeze/extension, authority and late-settlement tests remain enabled. Financial time is not shortened for the validator.
+
+Main program/SDK/IDL address is unchanged: `Fg6PaFpoGXkYsidMpWxTWqkZ86H8vFnafnHCW3Yj6nD`.
+
+- Main SBF `target/deploy/content_rights_protocol.so` SHA256: `20b063fc0dc2fc9ebf9bdb473284c405b9f1423b41ba8bd5d2bb1861d52e1e81`.
+- Generated main IDL SHA256: `dd0f3590b61ca2d06c47bc225c18b3b6a967b20ef2ac51e128e594b6d473f5a1`, equal to the document-commit IDL; no account/instruction ABI change.
+- Frozen baseline SBF hash for R2 reproduction: `145f2e7ed3db3e979050c9493a405d61684b624920571305173f886c9b6b263e`.
+
+The isolated source copy is `.local-tools/audit-evidence/validator-copy`. Its source HEAD is the execution SHA above. Tracked patch hash is `634e1a24a8bb1f0d3a1d3a8c67c0cf99f4510b145dedf578799a4e31c6f9ccd8`; `validator-source.json` records hashes of every copied file including both then-untracked new tests (manifest SHA256 `6f35c97672334db546dde126859e5c93aa83456da1dcd561d3688c1fff2dfdde`). Subsequent changes only completed report documents. No global wallet or cluster configuration was used. The validator invocation was:
+
+```bash
+solana-test-validator --ledger .local-tools/audit-evidence/validator-ledger \
+  --bind-address 127.0.0.1 --rpc-port 8899 --faucet-port 19900 \
+  --gossip-port 18660 --dynamic-port-range 18661-18701 --quiet
+```
+
+Four distinct temporary admin/originality/rights/treasury keys were prepared using the existing helpers. The copy alone was synchronized and rebuilt. Its changed source/generated files are exactly lib.rs, Anchor.toml, SDK and IDL. Recursive IDL comparison found only the top-level address and initialize's fixed program-account address changed; account layouts and instructions are identical. The initial comparison that normalized only the top-level address failed, then both expected address fields were identified and checked; no unexplained ABI difference remains.
+
+Temporary program id: `DpgWvT7YrHwmVxTY6hN3D6J2WzgRCJqVB66ahzCVbS91`; ProgramData: `4evNtkeZD2U3DiWijyH9QsEvDhNooBn1sTuqKKfgYxx5`. Isolated SBF SHA256: `91b3004dd15e1da7281ae5e3065268fd3272a558934b3aba8b4a972f861addfe`. Deployment signature: `VsLspoYTYbPQH5vR4HGBDuuiyCZLVXfo5JUawHkwrbG4mVQxbirGz4P52SMjtua5tpQL1ZEjTqjVFH1q4YoUC6T`; initialization signature: `4fxuiJGiEgiY2oZ8eqVmQ9iaqbGs9d5Xf45ujCtsUBnL3rVajGbJyDtCXv7X45btz95B2z7J3bTXNdJouqQjasD`.
+
+Smoke assertions verify actual loader ownership/executable state and ProgramData upgrade authority, role config, approved plain SPL/Token-2022 mints, signed staged→chain-confirmed Content/Fingerprint identities, nodes, positive deposits, content-scoped receipts and claims. Every path ends at gross100/paid100/fees0/user-liability0, with exact funding/recipient/vault balances. Receipt/claim replay cannot transfer again. Signed paid-key release succeeds for the real finalized buyer receipt, rejects outsiders, and rejects a simulated RPC outage. Live zero-gross epochs reject reveal while own proofs remain available; matching positive epochs authorize it. The validator was stopped after completion; ledger/temporary keys remain ignored for local evidence.
+
+Warnings were preserved: Agave 2.3.0 post-processing lists standard Solana syscalls as undefined with tools v1.57; real current-artifact LiteSVM and actual validator executions successfully exercise hashing, Clock/Rent, PDA/account creation and SPL/Token-2022 CPI, with no runtime syscall failure. The CLI also advises loader-v4 migration and Node emits punycode deprecation; these do not fail the tested upgradeable-loader contract. No loader migration or dependency expansion was performed to silence warnings.
+
+No unresolved R1–R6 or local-gate blocker remains. **UNKNOWN / NOT_RUN**: public-cluster transaction-v1 activation, devnet/testnet/mainnet deployment/configuration, production durability/key operations and independent security certification. These are outside this task. Execution contract, account/ABI, Canonicalization V1, PDA/Merkle formats, economic rates, authority, architecture and Mission/Milestone boundaries are preserved. No merge, tag/release, real funds or production mutation occurred. Stop at deployment review; subsequent public deployment is a separate authorized task.

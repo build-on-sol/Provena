@@ -10,7 +10,7 @@
     "test:vm": "cargo test -p content-rights-protocol --test security -- --ignored",
     "service": "node dist/services/server.js"
   },
-  "dependencies": { "@coral-xyz/anchor": "0.32.1", "@solana/web3.js": "1.98.4" },
+  "dependencies": { "@coral-xyz/anchor": "0.32.1", "@solana/web3.js": "1.99.0" },
   "devDependencies": { "@types/node": "22.18.0", "typescript": "5.9.2" },
   "overrides": { "toml": "4.2.0", "jayson": "5.0.0" },
   "engines": { "node": ">=22" }

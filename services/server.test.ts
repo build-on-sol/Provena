@@ -8,10 +8,10 @@ import { AddressInfo } from 'node:net';
 import { AccountInfo, Connection, PublicKey } from '@solana/web3.js';
 import { BN, BorshCoder, Idl } from '@coral-xyz/anchor';
 import { hashContent } from '../packages/canonicalization/src';
-import { buildPayoutTree, createOriginalNodeRights, payoutVector, RevenueKind } from '../packages/rights-math/src';
+import { buildPayoutTree, createOriginalNodeRights, payoutVector, RevenueKind, verifyPayoutProof } from '../packages/rights-math/src';
 import { verifyProvenanceChain, verifyProvenanceReveal } from '../packages/protocol-sdk/src';
 import { Ed25519AuthoritySigner, requestMessage, SignedRequest, verifyWalletSignature, WalletAuthenticator } from './auth';
-import { accountDiscriminator, ChainNodeSnapshot, DEFAULT_PROGRAM_ID, RpcNodeReader, RpcReceiptVerifier } from './chain';
+import { accountDiscriminator, ChainNodeSnapshot, DEFAULT_PROGRAM_ID, finalizedAccountReader, RpcNodeReader, RpcReceiptVerifier } from './chain';
 import { ContentService, decryptBlob } from './content-service';
 import { EventIndexer, IndexedEvent, RpcEventPoller } from './indexer';
 import { ProvenanceService } from './provenance-service';
@@ -39,6 +39,231 @@ function event(index: number, name: string, data: Record<string, string>): Index
   return { signature: '2'.repeat(88), slot: 42, index, name, data };
 }
 
+async function disclosureFixture(t: TestContext) {
+  const { store, directory } = await fixture(t);
+  const a = wallet(), b = wallet(), c = wallet(), attacker = wallet();
+  const authority = new Ed25519AuthoritySigner(wallet().privateKey);
+  const content = key(), original = key();
+  const rights = createOriginalNodeRights(new PublicKey(a.address).toBuffer());
+  const snapshots = new Map<string, ChainNodeSnapshot>([[original, {
+    node: original, content, creator: a.address, tipRoot: buildPayoutTree(new PublicKey(original).toBuffer(), RevenueKind.Tip, payoutVector(rights.tip)).root,
+    saleRoot: buildPayoutTree(new PublicKey(original).toBuffer(), RevenueKind.Sale, payoutVector(rights.sale)).root,
+    tipRetentionBps: 7000, saleRetentionBps: 8000, tipResidualBps: 10_000, saleResidualBps: 10_000, commitment: '00'.repeat(32), originalRights: rights,
+  }]]);
+  const valueNodes = new Set<string>();
+  let available = true;
+  const reader = {
+    readNode: async (node: string) => { assert.ok(available, 'RPC unavailable'); const row = snapshots.get(node); assert.ok(row, 'Node is not finalized on chain'); return row; },
+    hasValueEvent: async (node: string, _content: string, _evidence: unknown) => available && valueNodes.has(node),
+  };
+  const service = new ProvenanceService(store, reader, DEFAULT_PROGRAM_ID, authority);
+  await service.registerOriginal(a.address, original);
+  const commit = async (plan: Awaited<ReturnType<ProvenanceService['attestRepost']>>, creator: string) => {
+    const publicPlan = plan.publicPlan;
+    snapshots.set(publicPlan.node, { node: publicPlan.node, content, creator, tipRoot: publicPlan.tipRoot, saleRoot: publicPlan.saleRoot, tipRetentionBps: 10_000 - publicPlan.tipChildBps, saleRetentionBps: 10_000 - publicPlan.saleChildBps, tipResidualBps: publicPlan.tipResidualBps, saleResidualBps: publicPlan.saleResidualBps, commitment: publicPlan.provenanceCommitment });
+    await service.confirmNode(creator, publicPlan.node);
+  };
+  const planB = await service.attestRepost(b.address, { parent: original, nonce: '31'.repeat(32), policy: { tipRetentionBps: 6000, saleRetentionBps: 5000 } });
+  await commit(planB, b.address);
+  const planC = await service.attestRepost(c.address, { parent: planB.publicPlan.node, nonce: '32'.repeat(32), policy: { tipRetentionBps: 7000, saleRetentionBps: 7000 } });
+  await commit(planC, c.address);
+  return { store, directory, service, reader, snapshots, valueNodes, commit, a, b, c, attacker, authority, content, original, planC, setAvailable: (value: boolean) => { available = value; } };
+}
+
+test('R1 unsubmitted creator plan cannot reveal existing ancestors or full vector', async t => {
+  const fixture = await disclosureFixture(t);
+  const attack = await fixture.service.attestRepost(fixture.attacker.address, { parent: fixture.planC.publicPlan.node, nonce: '33'.repeat(32), policy: { tipRetentionBps: 7000, saleRetentionBps: 7000 } });
+  const evidence = { epoch: key(), nonce: '0' };
+  await assert.rejects(async () => Reflect.apply(fixture.service.reveal, fixture.service, [fixture.attacker.address, attack.publicPlan.node, evidence]));
+  await assert.rejects(async () => Reflect.apply(fixture.service.payoutProof, fixture.service, [fixture.attacker.address, attack.publicPlan.node, RevenueKind.Tip, evidence]));
+});
+
+test('R1 finalized node and cached verified label still need a real positive value event', async t => {
+  const fixture = await disclosureFixture(t);
+  const node = fixture.planC.publicPlan.node;
+  await assert.rejects(async () => Reflect.apply(fixture.service.reveal, fixture.service, [fixture.c.address, node, { epoch: key(), nonce: '0' }]));
+  await assert.rejects(async () => Reflect.apply(fixture.service.payoutProof, fixture.service, [fixture.c.address, node, RevenueKind.Tip, { epoch: key(), nonce: '0' }]));
+  const ownProof = await fixture.service.payoutProof(fixture.c.address, node, RevenueKind.Tip);
+  assert.equal(ownProof.leaves.length, 1);
+  assert.equal(ownProof.leaves[0]!.beneficiary, new PublicKey(fixture.c.address).toBuffer().toString('hex'));
+  assert.ok(verifyPayoutProof(new PublicKey(node).toBuffer(), RevenueKind.Tip, ownProof.leaves[0]!, ownProof.proofs[0]!.map(value => Buffer.from(value, 'hex')), Buffer.from(ownProof.root, 'hex')));
+  fixture.valueNodes.add(node);
+  const evidence = { epoch: key(), nonce: '0' };
+  assert.equal((await fixture.service.reveal(fixture.authority.wallet, node, evidence)).length, 2);
+  await assert.rejects(fixture.service.reveal(fixture.a.address, node, evidence), /Unauthorized/);
+  await assert.rejects(fixture.service.payoutProof(fixture.a.address, node, RevenueKind.Tip, evidence), /Unauthorized/);
+  assert.equal((await fixture.service.payoutProof(fixture.a.address, node, RevenueKind.Tip)).leaves.length, 1);
+});
+
+test('R1 signed HTTP rejects plan-to-reveal and full-vector ancestry bypasses', async t => {
+  const fixture = await disclosureFixture(t);
+  const app = createServiceApp({ store: fixture.store, receiptVerifier: { hasAccess: async () => false }, nodeReader: fixture.reader, rightsAuthority: fixture.authority, now: () => 1_000_000 });
+  await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>((resolve, reject) => app.server.close(error => error ? reject(error) : resolve())));
+  const base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+  const call = async (path: string, payload: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signedRequest(fixture.attacker, path, payload)) });
+  const planned = await call('/provenance/attest', { parent: fixture.planC.publicPlan.node, nonce: '34'.repeat(32), policy: { tipRetentionBps: 7000, saleRetentionBps: 7000 } });
+  assert.equal(planned.status, 200);
+  const plan = await planned.json() as Awaited<ReturnType<ProvenanceService['attestRepost']>>;
+  const reveal = await call('/provenance/reveal', { node: plan.publicPlan.node, valueEvent: { epoch: key(), nonce: '0' } });
+  assert.notEqual(reveal.status, 200);
+  const proof = await call('/provenance/proof', { node: plan.publicPlan.node, kind: RevenueKind.Tip, valueEvent: { epoch: key(), nonce: '0' } });
+  assert.notEqual(proof.status, 200);
+  await fixture.commit(plan, fixture.attacker.address);
+  assert.equal((await call('/provenance/reveal', { node: plan.publicPlan.node, valueEvent: { epoch: key(), nonce: '0' } })).status, 403);
+  const own = await call('/provenance/proof', { node: plan.publicPlan.node, kind: RevenueKind.Tip });
+  assert.equal(own.status, 200);
+  assert.equal((await own.json() as { leaves: unknown[] }).leaves.length, 1);
+  fixture.valueNodes.add(plan.publicPlan.node);
+  const allowed = await call('/provenance/reveal', { node: plan.publicPlan.node, valueEvent: { epoch: key(), nonce: '0' } });
+  assert.equal(allowed.status, 200);
+  const links = await allowed.json() as Awaited<ReturnType<ProvenanceService['reveal']>>;
+  assert.equal(links.length, 3);
+  assert.ok(verifyProvenanceChain(links, plan.publicPlan.provenanceCommitment));
+  fixture.setAvailable(false);
+  assert.equal((await call('/provenance/reveal', { node: plan.publicPlan.node, valueEvent: { epoch: key(), nonce: '0' } })).status, 503);
+});
+
+test('R1 finalized epoch reader verifies positive value, exact PDA, owner, version, node/content and payout root', async () => {
+  const idl = JSON.parse(await readFile(join(process.cwd(), 'idl/content_rights_protocol.json'), 'utf8')) as Idl;
+  const coder = new BorshCoder(idl);
+  const content = new PublicKey(key()), node = new PublicKey(key()), mint = new PublicKey(key()), creator = new PublicKey(key());
+  const roots = [randomBytes(32), randomBytes(32)];
+  const nodeData = await coder.accounts.encode('DistributionNode', { version: 1, content, creator, tip_payout_root: Array.from(roots[0]!), sale_payout_root: Array.from(roots[1]!), tip_child_bps: 3000, sale_child_bps: 3000, tip_residual_bps: 1200, sale_residual_bps: 1200, provenance_commitment: Array.from(randomBytes(32)), next_epoch: new BN(8) });
+  const account = (data: Buffer): AccountInfo<Buffer> => ({ data, owner: DEFAULT_PROGRAM_ID, executable: false, lamports: 1, rentEpoch: 1 });
+  const accounts = new Map<string, AccountInfo<Buffer>>([[node.toBase58(), account(nodeData)]]);
+  const rpc = { getAccountInfo: async (address: PublicKey, commitment: string) => { assert.equal(commitment, 'finalized'); return accounts.get(address.toBase58()) ?? null; } } as unknown as Connection;
+  const reader = new RpcNodeReader(finalizedAccountReader(rpc));
+  for (const kind of [0, 1]) {
+    const nonce = Buffer.alloc(8); nonce.writeBigUInt64LE(7n);
+    const epoch = PublicKey.findProgramAddressSync([Buffer.from('epoch'), node.toBuffer(), mint.toBuffer(), Buffer.from([kind]), nonce], DEFAULT_PROGRAM_ID)[0];
+    const evidence = { epoch: epoch.toBase58(), nonce: '7' };
+    const data = await coder.accounts.encode('RevenueEpoch', { version: 1, content, node, mint, kind, payout_root: Array.from(roots[kind]!), gross: new BN(100), paid: new BN(10), fees: new BN(5), opened_at: new BN(1), deadline: new BN(604801), post_review: false });
+    const valid = account(data); accounts.set(epoch.toBase58(), valid);
+    assert.equal(await reader.hasValueEvent(node.toBase58(), content.toBase58(), evidence), true);
+    await assert.rejects(reader.hasValueEvent(node.toBase58(), content.toBase58(), { ...evidence, nonce: '8' }), /InvalidValueEventEpoch/);
+    await assert.rejects(reader.hasValueEvent(node.toBase58(), key(), evidence), /ValueEventContentMismatch/);
+    await assert.rejects(reader.hasValueEvent(node.toBase58(), content.toBase58(), { ...evidence, nonce: '18446744073709551616' }), /InvalidEpochNonce/);
+    for (const offset of [0, 8, 9, 41, 73, 105, 106, 146]) {
+      const invalid = Buffer.from(data);
+      if (offset === 0) invalid[0] = invalid[0]! ^ 255;
+      else if (offset === 8) invalid[8] = 2;
+      else if (offset === 105) invalid[105] = 2;
+      else if (offset === 146) invalid.writeBigUInt64LE(101n, 146);
+      else randomBytes(32).copy(invalid, offset);
+      accounts.set(epoch.toBase58(), account(invalid));
+      await assert.rejects(reader.hasValueEvent(node.toBase58(), content.toBase58(), evidence));
+    }
+    for (const invalid of [{ ...valid, owner: new PublicKey(key()) }, { ...valid, executable: true }, { ...valid, data: data.subarray(0, 178) }]) {
+      accounts.set(epoch.toBase58(), invalid);
+      await assert.rejects(reader.hasValueEvent(node.toBase58(), content.toBase58(), evidence), /InvalidChainAccount/);
+    }
+    const zero = Buffer.from(data); zero.writeBigUInt64LE(0n, 138); zero.writeBigUInt64LE(0n, 146); zero.writeBigUInt64LE(0n, 154);
+    accounts.set(epoch.toBase58(), account(zero));
+    assert.equal(await reader.hasValueEvent(node.toBase58(), content.toBase58(), evidence), false);
+    accounts.delete(epoch.toBase58()); // An unavailable/unfinalized account is never evidence.
+    assert.equal(await reader.hasValueEvent(node.toBase58(), content.toBase58(), evidence), false);
+  }
+});
+
+test('R5 pending draft cannot permanently occupy another author canonical identity across restart', async t => {
+  const { directory, store } = await fixture(t);
+  const attacker = wallet(), author = wallet();
+  const input = { body: 'Original body known before chain submission', mode: 'PUBLIC' as const, title: 'Draft' };
+  const first = new ContentService(store, DEFAULT_PROGRAM_ID, { hasAccess: async () => false });
+  const attack = await first.stage(attacker.address, input);
+  const restarted = new ContentService(await LocalStore.open(join(directory, 'store.json')), DEFAULT_PROGRAM_ID, { hasAccess: async () => false });
+  const legitimate = await restarted.stage(author.address, input);
+  assert.notEqual(attack.id, legitimate.id);
+  assert.equal(legitimate.author, author.address);
+  assert.equal(restarted.get(attack.id).author, attacker.address);
+  assert.equal(restarted.get(legitimate.id).canonicalHash, attack.canonicalHash);
+});
+
+test('R5 concurrent signed staging shares canonical text without sharing identity or paid keys', async t => {
+  const { store } = await fixture(t);
+  const a = wallet(), b = wallet(), master = randomBytes(32);
+  const service = new ContentService(store, DEFAULT_PROGRAM_ID, { hasAccess: async () => true }, master);
+  const input = { body: 'Identical pending paid content from distinct authors', mode: 'PAID' as const, title: 'Paid draft' };
+  const results = await Promise.allSettled([service.stage(a.address, input), service.stage(b.address, input)]);
+  assert.equal(results.filter(value => value.status === 'fulfilled').length, 2);
+  const artifacts = results.map(value => { assert.equal(value.status, 'fulfilled'); return (value as PromiseFulfilledResult<Awaited<ReturnType<ContentService['stage']>>>).value; });
+  assert.notEqual(artifacts[0]!.id, artifacts[1]!.id);
+  const keys = artifacts.map(artifact => service.privateKey(service.get(artifact.id)));
+  assert.equal(keys[0]!.equals(keys[1]!), false);
+  assert.equal(decryptBlob(artifacts[0]!.blob!, keys[0]!, `provena:body:v1:${artifacts[0]!.id}`).toString(), input.body);
+  assert.throws(() => decryptBlob(artifacts[0]!.blob!, keys[1]!, `provena:body:v1:${artifacts[0]!.id}`));
+});
+
+test('R5 signed confirmation requires finalized immutable identity and preserves paid keys across restart', async t => {
+  const { directory, store } = await fixture(t);
+  const author = wallet(), attacker = wallet(), master = randomBytes(32);
+  const idl = JSON.parse(await readFile(join(process.cwd(), 'idl/content_rights_protocol.json'), 'utf8')) as Idl;
+  const coder = new BorshCoder(idl);
+  const accounts = new Map<string, AccountInfo<Buffer>>();
+  let available = true;
+  const rpc = { getAccountInfo: async (address: PublicKey, commitment: string) => { assert.equal(commitment, 'finalized'); if (!available) throw new Error('RPC offline'); return accounts.get(address.toBase58()) ?? null; } } as unknown as Connection;
+  const identityReader = new RpcNodeReader(finalizedAccountReader(rpc));
+  const app = createServiceApp({ store, receiptVerifier: { hasAccess: async () => false }, nodeReader: unavailableNodeReader, contentIdentityReader: identityReader, encryptionMasterKey: master, now: () => 1_000_000 });
+  await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>((resolve, reject) => app.server.close(error => error ? reject(error) : resolve())));
+  const base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+  const call = (keys: ReturnType<typeof wallet>, path: string, payload: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signedRequest(keys, path, payload)) });
+  const input = { body: 'Finalized paid identity must retain its ciphertext and key.', mode: 'PAID' as const, title: 'Immutable paid artifact' };
+  const staged = await call(author, '/content', input);
+  assert.equal(staged.status, 200);
+  const artifact = (await staged.json() as { artifact: Awaited<ReturnType<ContentService['stage']>> }).artifact;
+  assert.equal(artifact.lifecycle, 'PENDING');
+  const originalArtifact = app.content.get(artifact.id), originalKey = app.content.privateKey(originalArtifact);
+  assert.equal((await call(attacker, '/content/confirm', { content: artifact.id })).status, 403);
+  assert.equal((await call(author, '/content/confirm', { content: artifact.id })).status, 409);
+  const bytes = (hex: string) => Array.from(Buffer.from(hex, 'hex'));
+  const contentData = await coder.accounts.encode('Content', {
+    version: 1, author: new PublicKey(author.address), raw_hash: bytes(artifact.rawHash), canonical_hash: bytes(artifact.canonicalHash), canonicalization_version: 1,
+    metadata_commitment: bytes(artifact.metadataCommitment), storage_commitment: bytes(artifact.storageCommitment), citation_manifest_commitment: bytes(artifact.citationManifest.commitment),
+    mode: 1, status: 1, quote_policy: 0, price: new BN(100), price_mint: new PublicKey(key()), original_node: PublicKey.default,
+    licensed_source: PublicKey.default, licensed_source_bps: 0, derivative_source: PublicKey.default, derivative_source_bps: 0,
+    created_at: new BN(1), normal_deadline: new BN(0), active_case: PublicKey.default, case_resolved: false,
+  });
+  const fingerprint = PublicKey.findProgramAddressSync([Buffer.from('fingerprint'), Buffer.from(artifact.canonicalHash, 'hex')], DEFAULT_PROGRAM_ID)[0];
+  const fingerprintData = await coder.accounts.encode('FingerprintRegistry', { version: 1, canonical_hash: bytes(artifact.canonicalHash), content: new PublicKey(artifact.id) });
+  const account = (data: Buffer): AccountInfo<Buffer> => ({ data, owner: DEFAULT_PROGRAM_ID, executable: false, lamports: 1, rentEpoch: 1 });
+  accounts.set(artifact.id, account(contentData)); accounts.set(fingerprint.toBase58(), account(fingerprintData));
+  for (const offset of [9, 41, 73, 105, 107, 139, 171, 203, 205]) {
+    const invalid = Buffer.from(contentData);
+    if (offset === 105) invalid.writeUInt16LE(2, 105);
+    else if (offset === 203 || offset === 205) invalid[offset] = 0 === invalid[offset] ? 1 : 0;
+    else randomBytes(32).copy(invalid, offset);
+    accounts.set(artifact.id, account(invalid));
+    await assert.rejects(app.content.confirm(author.address, artifact.id));
+    assert.equal(app.content.get(artifact.id).lifecycle, 'PENDING');
+  }
+  accounts.set(artifact.id, account(contentData));
+  const wrongFingerprint = Buffer.from(fingerprintData); new PublicKey(key()).toBuffer().copy(wrongFingerprint, 41);
+  accounts.set(fingerprint.toBase58(), account(wrongFingerprint));
+  await assert.rejects(app.content.confirm(author.address, artifact.id), /ContentNotConfirmed/);
+  accounts.set(fingerprint.toBase58(), { ...account(fingerprintData), owner: new PublicKey(key()) });
+  await assert.rejects(app.content.confirm(author.address, artifact.id), /InvalidChainAccount/);
+  accounts.set(fingerprint.toBase58(), account(fingerprintData));
+  const confirmed = await call(author, '/content/confirm', { content: artifact.id });
+  assert.equal(confirmed.status, 200);
+  assert.equal((await confirmed.json() as { artifact: { lifecycle: string }; storageState: string }).storageState, 'CHAIN_CONFIRMED_ARTIFACT');
+  assert.deepEqual(app.content.get(artifact.id), { ...originalArtifact, lifecycle: 'CONFIRMED' });
+  assert.ok(app.content.privateKey(app.content.get(artifact.id)).equals(originalKey));
+  const restarted = new ContentService(await LocalStore.open(join(directory, 'store.json')), DEFAULT_PROGRAM_ID, { hasAccess: async () => false }, master, Date.now, identityReader);
+  assert.equal(restarted.get(artifact.id).lifecycle, 'CONFIRMED');
+  assert.ok(restarted.privateKey(restarted.get(artifact.id)).equals(originalKey));
+  assert.equal(restarted.privateBody(restarted.get(artifact.id)), input.body);
+  await assert.rejects(restarted.stage(attacker.address, input), /DuplicateContent/);
+  await assert.rejects(restarted.confirm(attacker.address, artifact.id), /Unauthorized/);
+  available = false;
+  await assert.rejects(restarted.confirm(author.address, artifact.id), /ContentIdentityVerifierUnavailable/);
+  await assert.rejects(restarted.stage(attacker.address, { ...input, body: 'RPC errors cannot approve a new identity' }), /ContentIdentityVerifierUnavailable/);
+  assert.deepEqual(restarted.get(artifact.id), { ...originalArtifact, lifecycle: 'CONFIRMED' });
+  const risk = restarted.originalityRisk(input.body);
+  assert.equal(risk.scope, 'OFFCHAIN_RISK_ONLY'); assert.equal(risk.approved, false);
+});
+
 test('wallet request signatures bind action, content, time and durable one-use nonce', async t => {
   const { directory, store } = await fixture(t);
   const keys = wallet();
@@ -59,14 +284,17 @@ test('wallet request signatures bind action, content, time and durable one-use n
   assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
 });
 
-test('content keeps raw identity, global local fingerprint and immutable author', async t => {
+test('content keeps raw identity and immutable author without treating local drafts as global ownership', async t => {
   const { directory, store } = await fixture(t);
   const first = wallet(), second = wallet();
   const service = new ContentService(store, DEFAULT_PROGRAM_ID, { hasAccess: async () => false });
   const artifact = await service.stage(first.address, { body: 'Ａ  text\r\n', mode: 'PUBLIC', title: 'Original' });
   assert.equal(artifact.rawHash, hashContent('Ａ  text\r\n').rawHash);
   assert.equal(artifact.canonicalizationVersion, 1);
-  await assert.rejects(service.stage(second.address, { body: 'A text\n', mode: 'PUBLIC', title: 'Copy' }), /DuplicateContent/);
+  const otherDraft = await service.stage(second.address, { body: 'A text\n', mode: 'PUBLIC', title: 'Copy' });
+  assert.notEqual(otherDraft.id, artifact.id);
+  assert.equal(otherDraft.canonicalHash, artifact.canonicalHash);
+  assert.equal(otherDraft.lifecycle, 'PENDING');
   assert.equal(service.get(artifact.id).author, first.address);
   const reloaded = new ContentService(await LocalStore.open(join(directory, 'store.json')), DEFAULT_PROGRAM_ID, { hasAccess: async () => false });
   assert.equal(reloaded.get(artifact.id).plaintext, 'Ａ  text\r\n');
@@ -162,7 +390,8 @@ test('provenance plans keep parents private and enforce real parent roots and in
   const tipRoot = buildPayoutTree(new PublicKey(original).toBuffer(), RevenueKind.Tip, payoutVector(rights.tip)).root;
   const saleRoot = buildPayoutTree(new PublicKey(original).toBuffer(), RevenueKind.Sale, payoutVector(rights.sale)).root;
   const snapshots = new Map<string, ChainNodeSnapshot>([[original, { node: original, content, creator: a.address, tipRoot, saleRoot, tipRetentionBps: 7000, saleRetentionBps: 8000, tipResidualBps: 10_000, saleResidualBps: 10_000, commitment: '00'.repeat(32), originalRights: rights }]]);
-  const service = new ProvenanceService(store, { readNode: async node => { const row = snapshots.get(node); assert.ok(row); return row; } }, DEFAULT_PROGRAM_ID, authority);
+  const valueNodes = new Set<string>();
+  const service = new ProvenanceService(store, { readNode: async node => { const row = snapshots.get(node); assert.ok(row); return row; }, hasValueEvent: async node => valueNodes.has(node) }, DEFAULT_PROGRAM_ID, authority);
   await assert.rejects(service.registerOriginal(outsider.address, original), /Unauthorized/);
   await service.registerOriginal(a.address, original);
   const planB = await service.attestRepost(b.address, { parent: original, nonce: '01'.repeat(32), policy: { tipRetentionBps: 6000, saleRetentionBps: 5000 } });
@@ -174,29 +403,34 @@ test('provenance plans keep parents private and enforce real parent roots and in
   snapshots.set(planB.publicPlan.node, { node: planB.publicPlan.node, content, creator: b.address, tipRoot: planB.publicPlan.tipRoot, saleRoot: planB.publicPlan.saleRoot, tipRetentionBps: 6000, saleRetentionBps: 5000, tipResidualBps: 3000, saleResidualBps: 2000, commitment: planB.publicPlan.provenanceCommitment });
   await service.confirmNode(b.address, planB.publicPlan.node);
   const planC = await service.attestRepost(c.address, { parent: planB.publicPlan.node, nonce: '02'.repeat(32), policy: { tipRetentionBps: 10_000, saleRetentionBps: 10_000 } });
-  const tip = service.payoutProof(c.address, planC.publicPlan.node, RevenueKind.Tip);
+  snapshots.set(planC.publicPlan.node, { node: planC.publicPlan.node, content, creator: c.address, tipRoot: planC.publicPlan.tipRoot, saleRoot: planC.publicPlan.saleRoot, tipRetentionBps: 10_000, saleRetentionBps: 10_000, tipResidualBps: planC.publicPlan.tipResidualBps, saleResidualBps: planC.publicPlan.saleResidualBps, commitment: planC.publicPlan.provenanceCommitment });
+  await service.confirmNode(c.address, planC.publicPlan.node);
+  valueNodes.add(planC.publicPlan.node);
+  const evidence = { epoch: key(), nonce: '0' };
+  const tip = await service.payoutProof(c.address, planC.publicPlan.node, RevenueKind.Tip, evidence);
   const byWallet = Object.fromEntries(tip.leaves.map(leaf => [leaf.beneficiary, leaf.shareBps]));
   assert.equal(byWallet[new PublicKey(a.address).toBuffer().toString('hex')], 7000);
   assert.equal(byWallet[new PublicKey(b.address).toBuffer().toString('hex')], 1800);
   assert.equal(byWallet[new PublicKey(c.address).toBuffer().toString('hex')], 1200);
-  const reveal = service.reveal(c.address, planC.publicPlan.node);
+  const reveal = await service.reveal(c.address, planC.publicPlan.node, evidence);
   assert.equal(reveal.length, 2);
   assert.ok(reveal.every(verifyProvenanceReveal));
   assert.ok(verifyProvenanceChain(reveal, planC.publicPlan.provenanceCommitment));
   await assert.rejects(async () => service.reveal(outsider.address, planC.publicPlan.node), /Unauthorized/);
-  assert.equal(service.payoutProof(a.address, planC.publicPlan.node, RevenueKind.Tip).leaves.length, 1);
-  assert.throws(() => service.payoutProof(outsider.address, planC.publicPlan.node, RevenueKind.Tip), /Unauthorized/);
+  assert.equal((await service.payoutProof(a.address, planC.publicPlan.node, RevenueKind.Tip)).leaves.length, 1);
+  await assert.rejects(service.payoutProof(outsider.address, planC.publicPlan.node, RevenueKind.Tip), /Unauthorized/);
   const oldRoot = planB.publicPlan.tipRoot;
   snapshots.get(original)!.tipRetentionBps = 9000;
   const updatedPolicy = await service.attestRepost(outsider.address, { parent: original, nonce: '03'.repeat(32), policy: { tipRetentionBps: 10_000, saleRetentionBps: 10_000 } });
   assert.equal(updatedPolicy.publicPlan.tipResidualBps, 1000);
-  assert.equal(service.payoutProof(b.address, planB.publicPlan.node, RevenueKind.Tip).root, oldRoot);
+  assert.equal((await service.payoutProof(b.address, planB.publicPlan.node, RevenueKind.Tip)).root, oldRoot);
   snapshots.get(original)!.tipRoot = 'ff'.repeat(32);
   await assert.rejects(service.attestRepost(b.address, { parent: original, nonce: '04'.repeat(32), policy: { tipRetentionBps: 7000, saleRetentionBps: 7000 } }), /ChainRightsMismatch/);
 });
 
 test('RPC node reader matches exact chain account layout and rejects ownership substitution', async () => {
-  const creator = wallet(), content = new PublicKey(key());
+  const creator = wallet(), rawHash = randomBytes(32);
+  const content = PublicKey.findProgramAddressSync([Buffer.from('content'), new PublicKey(creator.address).toBuffer(), rawHash], DEFAULT_PROGRAM_ID)[0];
   const original = PublicKey.findProgramAddressSync([Buffer.from('original'), content.toBuffer()], DEFAULT_PROGRAM_ID)[0];
   const rights = createOriginalNodeRights(new PublicKey(creator.address).toBuffer());
   const nodeData = Buffer.alloc(185), contentData = Buffer.alloc(395);
@@ -205,7 +439,7 @@ test('RPC node reader matches exact chain account layout and rejects ownership s
   Buffer.from(buildPayoutTree(original.toBuffer(), RevenueKind.Tip, payoutVector(rights.tip)).root, 'hex').copy(nodeData, 73);
   Buffer.from(buildPayoutTree(original.toBuffer(), RevenueKind.Sale, payoutVector(rights.sale)).root, 'hex').copy(nodeData, 105);
   nodeData.writeUInt16LE(3000, 137); nodeData.writeUInt16LE(2000, 139); nodeData.writeUInt16LE(10_000, 141); nodeData.writeUInt16LE(10_000, 143);
-  accountDiscriminator('Content').copy(contentData); contentData[8] = 1; new PublicKey(creator.address).toBuffer().copy(contentData, 9); original.toBuffer().copy(contentData, 246);
+  accountDiscriminator('Content').copy(contentData); contentData[8] = 1; new PublicKey(creator.address).toBuffer().copy(contentData, 9); rawHash.copy(contentData, 41); original.toBuffer().copy(contentData, 246);
   let owner = DEFAULT_PROGRAM_ID;
   const reader = new RpcNodeReader({ getAccountInfo: async address => ({ data: address.equals(original) ? nodeData : contentData, owner, executable: false, lamports: 1, rentEpoch: 1 }) });
   const snapshot = await reader.readNode(original.toBase58());
@@ -274,7 +508,9 @@ test('generated IDL Borsh account bytes agree with service receipt and node layo
   const idl = JSON.parse(await readFile(join(process.cwd(), 'idl/content_rights_protocol.json'), 'utf8')) as Idl;
   assert.equal(idl.address, DEFAULT_PROGRAM_ID.toBase58());
   const coder = new BorshCoder(idl);
-  const author = new PublicKey(key()), source = new PublicKey(key()), content = new PublicKey(key()), buyer = new PublicKey(key()), mint = new PublicKey(key());
+  const author = new PublicKey(key()), source = new PublicKey(key()), buyer = new PublicKey(key()), mint = new PublicKey(key());
+  const rawHash = randomBytes(32);
+  const content = PublicKey.findProgramAddressSync([Buffer.from('content'), author.toBuffer(), rawHash], DEFAULT_PROGRAM_ID)[0];
   const original = PublicKey.findProgramAddressSync([Buffer.from('original'), content.toBuffer()], DEFAULT_PROGRAM_ID)[0];
   const receipt = PublicKey.findProgramAddressSync([Buffer.from('access'), content.toBuffer(), buyer.toBuffer()], DEFAULT_PROGRAM_ID)[0];
   const rights = createOriginalNodeRights(author.toBuffer(), [{ beneficiary: source.toBuffer(), shareBps: 2000 }]);
@@ -282,7 +518,7 @@ test('generated IDL Borsh account bytes agree with service receipt and node layo
   const saleRoot = buildPayoutTree(original.toBuffer(), RevenueKind.Sale, payoutVector(rights.sale)).root;
   const zeros = Array.from(Buffer.alloc(32));
   const contentBytes = await coder.accounts.encode('Content', {
-    version: 1, author, raw_hash: Array.from(randomBytes(32)), canonical_hash: Array.from(randomBytes(32)), canonicalization_version: 1,
+    version: 1, author, raw_hash: Array.from(rawHash), canonical_hash: Array.from(randomBytes(32)), canonicalization_version: 1,
     metadata_commitment: zeros, storage_commitment: zeros, citation_manifest_commitment: zeros,
     mode: 1, status: 1, quote_policy: 0, price: new BN(17), price_mint: mint, original_node: original,
     licensed_source: source, licensed_source_bps: 2000, derivative_source: PublicKey.default, derivative_source_bps: 0,
@@ -380,11 +616,17 @@ test('generated IDL event logs flow through finalized RPC parser and exclude fai
       ];
     },
     getTransaction: async (signature: string, options: { commitment: string; maxSupportedTransactionVersion: number }) => {
-      assert.equal(options.commitment, 'finalized'); assert.equal(options.maxSupportedTransactionVersion, 0);
+      assert.equal(options.commitment, 'finalized'); assert.equal(options.maxSupportedTransactionVersion, 1);
       fetched.push(signature);
       const transaction = transactions.get(signature);
       assert.ok(transaction);
-      return transaction;
+      return {
+        ...transaction,
+        slot: signature === oldSignature ? 42 : signature === failedMetaSignature ? 44 : 45,
+        version: 'legacy',
+        meta: { ...transaction.meta, innerInstructions: signature === latestSignature ? [{ index: 0, instructions: [{ programIdIndex: 1 }] }] : [] },
+        transaction: { signatures: [signature], message: { compiledInstructions: [{ programIdIndex: 0 }], getAccountKeys: () => ({ get: (index: number) => [DEFAULT_PROGRAM_ID, foreignProgram][index] }) } },
+      };
     },
   } as unknown as Connection;
   const poller = new RpcEventPoller(rpc, DEFAULT_PROGRAM_ID, idl, indexer);

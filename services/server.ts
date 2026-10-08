@@ -7,7 +7,7 @@ import { Idl } from '@coral-xyz/anchor';
 import { CitationError, sha256 } from '../packages/canonicalization/src';
 import { RevenueKind, RightsMathError } from '../packages/rights-math/src';
 import { AuthoritySigner, canonicalJson, Ed25519AuthoritySigner, WalletAuthenticator } from './auth';
-import { DEFAULT_PROGRAM_ID, finalizedAccountReader, NodeReader, RpcNodeReader, RpcReceiptVerifier } from './chain';
+import { ContentIdentityReader, DEFAULT_PROGRAM_ID, finalizedAccountReader, NodeReader, RpcNodeReader, RpcReceiptVerifier, ValueEventEvidence } from './chain';
 import { ContentService, ReceiptVerifier, SubmitContent } from './content-service';
 import { EventIndexer, RpcEventPoller } from './indexer';
 import { ProvenanceService } from './provenance-service';
@@ -17,6 +17,7 @@ export interface ServiceOptions {
   store: LocalStore;
   receiptVerifier: ReceiptVerifier;
   nodeReader: NodeReader;
+  contentIdentityReader?: ContentIdentityReader;
   programId?: PublicKey;
   encryptionMasterKey?: Buffer;
   rightsAuthority?: AuthoritySigner;
@@ -40,10 +41,15 @@ function object(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 function string(value: unknown): string { requireCondition(typeof value === 'string', 'InvalidPayload'); return value; }
+function valueEvent(value: unknown): ValueEventEvidence | undefined {
+  if (value === undefined) return undefined;
+  const evidence = object(value);
+  return { epoch: string(evidence.epoch), nonce: string(evidence.nonce) };
+}
 export function createServiceApp(options: ServiceOptions): { server: Server; content: ContentService; provenance: ProvenanceService; indexer: EventIndexer } {
   const programId = options.programId ?? DEFAULT_PROGRAM_ID;
   requireCondition(options.rightsAuthority === undefined || options.originalityAuthority === undefined || options.rightsAuthority.wallet !== options.originalityAuthority.wallet, 'AuthorityRolesMustBeSeparate');
-  const content = new ContentService(options.store, programId, options.receiptVerifier, options.encryptionMasterKey, options.now);
+  const content = new ContentService(options.store, programId, options.receiptVerifier, options.encryptionMasterKey, options.now, options.contentIdentityReader);
   const provenance = new ProvenanceService(options.store, options.nodeReader, programId, options.rightsAuthority);
   const indexer = new EventIndexer(options.store);
   const auth = new WalletAuthenticator(options.store, options.now);
@@ -54,7 +60,7 @@ export function createServiceApp(options: ServiceOptions): { server: Server; con
     try {
       const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
       let result: unknown;
-      if (request.method === 'GET' && path === '/health') result = { status: 'ok', protocol: 'provena-v0', offchainOnly: true, indexerCheckpoint: options.store.snapshot().checkpoint };
+      if (request.method === 'GET' && path === '/health') result = { status: 'ok', protocol: 'provena-v0', offchainOnly: true, indexerCheckpoint: options.store.snapshot().checkpoint, indexerSync: indexer.syncStatus() };
       else if (request.method === 'GET' && path === '/feed') result = indexer.feed();
       else if (request.method === 'GET' && path.startsWith('/content/')) result = { artifact: content.publicArtifact(path.slice('/content/'.length)), chainState: indexer.feed().find(row => row.content === path.slice('/content/'.length)) ?? null, storageState: 'OFFCHAIN_ARTIFACT' };
       else if (request.method === 'GET' && path.startsWith('/metrics/')) result = indexer.metrics(path.slice('/metrics/'.length));
@@ -64,6 +70,7 @@ export function createServiceApp(options: ServiceOptions): { server: Server; con
         const payload = object(signed.payload);
         switch (path) {
           case '/content': result = { artifact: await content.stage(signed.wallet, payload as unknown as SubmitContent), storageState: 'STAGED_FOR_CHAIN_SUBMISSION' }; break;
+          case '/content/confirm': result = { artifact: await content.confirm(signed.wallet, string(payload.content)), storageState: 'CHAIN_CONFIRMED_ARTIFACT' }; break;
           case '/paid-key': result = await content.releaseKey(string(payload.content), signed.wallet); break;
           case '/originality': {
             requireCondition(options.originalityAuthority, 'OriginalityAuthorityUnconfigured', 503);
@@ -83,8 +90,8 @@ export function createServiceApp(options: ServiceOptions): { server: Server; con
             break;
           }
           case '/provenance/confirm': await provenance.confirmNode(signed.wallet, string(payload.node)); result = { confirmed: true }; break;
-          case '/provenance/reveal': result = provenance.reveal(signed.wallet, string(payload.node)); break;
-          case '/provenance/proof': requireCondition(payload.kind === RevenueKind.Tip || payload.kind === RevenueKind.Sale, 'InvalidRevenueKind'); result = provenance.payoutProof(signed.wallet, string(payload.node), payload.kind); break;
+          case '/provenance/reveal': result = await provenance.reveal(signed.wallet, string(payload.node), valueEvent(payload.valueEvent)); break;
+          case '/provenance/proof': requireCondition(payload.kind === RevenueKind.Tip || payload.kind === RevenueKind.Sale, 'InvalidRevenueKind'); result = await provenance.payoutProof(signed.wallet, string(payload.node), payload.kind, valueEvent(payload.valueEvent)); break;
           case '/review/messages': {
             const evidenceCommitment = payload.evidenceCommitment === undefined ? {} : { evidenceCommitment: string(payload.evidenceCommitment) };
             await indexer.message(signed.wallet, string(payload.case), { wallet: signed.wallet, timestamp: signed.timestamp, text: string(payload.text), ...evidenceCommitment, signature: signed.signature, nonce: signed.nonce });
@@ -128,7 +135,8 @@ export async function startLocalService(): Promise<Server> {
   const store = await LocalStore.open(resolve(process.env.PROVENA_DATA_FILE ?? '.local-data/provena.json'));
   requireCondition(process.env.CONTENT_MASTER_KEY === undefined || /^[0-9a-fA-F]{64}$/.test(process.env.CONTENT_MASTER_KEY), 'InvalidMasterKey');
   const [rightsAuthority, originalityAuthority] = await Promise.all([loadSigner(process.env.RIGHTS_AUTHORITY_KEY), loadSigner(process.env.ORIGINALITY_AUTHORITY_KEY)]);
-  const app = createServiceApp({ store, programId, receiptVerifier: new RpcReceiptVerifier(reader, programId), nodeReader: new RpcNodeReader(reader, programId), ...(process.env.CONTENT_MASTER_KEY ? { encryptionMasterKey: Buffer.from(process.env.CONTENT_MASTER_KEY, 'hex') } : {}), rightsAuthority, originalityAuthority });
+  const chainReader = new RpcNodeReader(reader, programId);
+  const app = createServiceApp({ store, programId, receiptVerifier: new RpcReceiptVerifier(reader, programId), nodeReader: chainReader, contentIdentityReader: chainReader, ...(process.env.CONTENT_MASTER_KEY ? { encryptionMasterKey: Buffer.from(process.env.CONTENT_MASTER_KEY, 'hex') } : {}), rightsAuthority, originalityAuthority });
   const port = Number(process.env.PORT ?? '8787');
   requireCondition(Number.isInteger(port) && port > 0 && port <= 65_535, 'InvalidPort');
   let poller: RpcEventPoller | undefined;
