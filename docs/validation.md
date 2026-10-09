@@ -69,9 +69,11 @@ Agave 2.3.0 post-processing with newer platform-tools v1.57 emits an undefined-s
 
 ## Final check results
 
+Current result as of 2026-10-09: the residual log-truncation correction and required matrix have completed at READY_FOR_DEPLOYMENT_REVIEW; see [the current run](#2026-10-09-indexer-log-truncation). The following 2026-10-08 results are preserved historical evidence and did not cover the subsequently verified truncation defect.
+
 2026-10-08, Asia/Shanghai: the authorized R1–R6 remediation is complete at **READY_FOR_DEPLOYMENT_REVIEW**. This is a local verification result, not public-cluster deployment authorization or security certification. See [the executed Handoff](handoffs/v0.0.1-audit-remediation.md#7-codex-findings) for verified defects, failure-first evidence, boundaries and all 17 changed files.
 
-Execution repository/worktree: `build-on-sol/Provena`, `/home/k5068/.codex/worktrees/c5e8/Provena`; branch `chore/v0.0.1-audit-handoff`; starting/execution HEAD `db6dafe4115f5f002c7fc62dad29ca4fe8d7c726` plus the current corrective changes. No newer branch commits were found. The final delivery commit is the commit containing this record (`git log -1 --format=%H -- docs/validation.md`); the starting SHA is not its final SHA.
+Historical execution repository/worktree: `build-on-sol/Provena`, `/home/k5068/.codex/worktrees/c5e8/Provena`; branch `chore/v0.0.1-audit-handoff`; starting/execution HEAD `db6dafe4115f5f002c7fc62dad29ca4fe8d7c726` plus that round's corrective changes. No newer branch commits were found then. The October8 delivery commit was `26a03ba078aec39eabdadf4d9f259ae08cc72533`; the October9 residual correction is a separate delivery recorded below.
 
 Tooling actually used: Node 22.22.1/npm 9.2.0, TypeScript 5.9.2, host Rust/Cargo 1.99.0, Anchor Rust/TS 0.32.1, Agave CLI/validator 2.3.0, LiteSVM 0.7.1. SBF builds explicitly use tools v1.57 (actual solana rustc 1.95.0-dev); the cargo-build-sbf 2.3.0 bare version display reports its default v1.48/1.84.1 and does not describe this invocation. Anchor CLI was unavailable (the inventory's `command -v anchor` exited 1); the existing official IDL builder example succeeded without it. The locked minimal client change is web3.js 1.98.4→1.99.0 with required codecs/errors 5.5.1 and commander 14.0.2; Anchor, Rust dependencies and Agave were not upgraded. [Official v1 read support](https://github.com/solana-foundation/solana-web3.js/releases/tag/v1.99.0) and the actual Connection response-decoding regressions justify that change.
 
@@ -130,3 +132,39 @@ Smoke assertions verify actual loader ownership/executable state and ProgramData
 Warnings were preserved: Agave 2.3.0 post-processing lists standard Solana syscalls as undefined with tools v1.57; real current-artifact LiteSVM and actual validator executions successfully exercise hashing, Clock/Rent, PDA/account creation and SPL/Token-2022 CPI, with no runtime syscall failure. The CLI also advises loader-v4 migration and Node emits punycode deprecation; these do not fail the tested upgradeable-loader contract. No loader migration or dependency expansion was performed to silence warnings.
 
 No unresolved R1–R6 or local-gate blocker remains. **UNKNOWN / NOT_RUN**: public-cluster transaction-v1 activation, devnet/testnet/mainnet deployment/configuration, production durability/key operations and independent security certification. These are outside this task. Execution contract, account/ABI, Canonicalization V1, PDA/Merkle formats, economic rates, authority, architecture and Mission/Milestone boundaries are preserved. No merge, tag/release, real funds or production mutation occurred. Stop at deployment review; subsequent public deployment is a separate authorized task.
+
+### 2026-10-09 Indexer Log Truncation
+
+Authorized corrective patch on `fix/v0.0.1-indexer-log-truncation`, starting/execution HEAD `4ef80c427fe589a2a3306f63b6426efc6342915e`, clean worktree `/home/k5068/.codex/worktrees/c5e8/Provena`; only a Handoff document was added after the earlier 26a03ba implementation. Current GitHub ref was checked before implementation. [Executed Handoff](handoffs/v0.0.1-indexer-log-truncation.md#codex-findings) contains per-AC findings and the five-file scope.
+
+The actual poller previously treated balanced invocation logs as complete even when the exact runtime marker indicated missing data. New tests use the existing RpcFixture, actual web3.js Connection JSON-RPC decoder and generated-IDL Borsh event coder. The production fix is one whole-log guard before any parsing/persistence, reusing IncompleteChainLogs/503 and failSync. Ordinary `Program log: Log truncated` text is accepted; the exact standalone runtime marker anywhere in a successful transaction rejects the entire transaction. No schema, error code, public response, financial ledger, dependency or chain change.
+
+Failure-first run: `npm run build` exit0, then `node --test --test-name-pattern 'log truncation' dist/services/indexer-rpc.test.js` exit1: **1 pass / 5 fail / 0 skip** (Missing expected rejection). Parser SHA256 before fix was `188b08458c45b5c317169f3e6208fbf4f53167093ccdc106b4af2cf189ded0d2`, matching HEAD; test-only patch hash `6c2cfdcf815c4be903ef53d071e1035c90d79ff75c0edd92f95e5f6df5acc2a6`. After the guard, the same command exits0: **6 pass / 0 fail / 0 skip**. Entire RPC suite: **17/17**, including all previous 11 cases. Cases cover marker inside/outside frames, foreign-only invocation, decodable prefix rollback, S1 retention/S2 block/no S3 request, durable restart/retry/concurrent polling, ordinary text/no-event controls and exactly-once recovery/backfill only when the test provider supplies complete verified logs.
+
+All logs below are new local ignored evidence in `.local-tools/log-truncation-evidence/`, not the previous audit directory. `gates.jsonl` records command, UTC timestamp, exit, execution HEAD, working patch hash and parser hash. Executable code/test patch SHA256 was `e0995e6765cb5d97581f3293bbfa75a3bbc60a3e27af47d7e9e67edf0a27c1ab`; subsequent edits only complete the three authorized report documents. Parser SHA256 after fix: `7e3bd7bec0a70d5792b16ad0a02350dbfbd1f7415187bff289f8eaff394b4c3f`; regression file SHA256: `907820c513b96a9fc8b90b5ee42c043120e4ca37c84fe5353a306528b032e8df`.
+
+| Actual current-run command | Result / exit | Log |
+|---|---|---|
+| `npm ci --ignore-scripts` | PASS / 0 | `before-ci.log` |
+| `npm run build` before/after fix | PASS / 0 each | `before-build.log`, `after-build.log` |
+| `node --test --test-name-pattern 'log truncation' dist/services/indexer-rpc.test.js` before fix | Verified original defect / 1; 1 pass, 5 fail, 0 skip | `before-regression.log` |
+| Same regression after fix | PASS / 0; 6 pass, 0 fail, 0 skip | `after-regression.log` |
+| `node --test dist/services/indexer-rpc.test.js` | PASS / 0; 17 pass, 0 fail, 0 skip | `after-rpc-suite.log` |
+| `npm test` (includes tsc) | PASS / 0; 73 pass, 0 fail, 0 skip | `after-npm-test.log` |
+| `npm audit` | PASS / 0; 0 vulnerabilities | `after-audit.log` |
+| `cargo fmt --all --check` | PASS / 0 | `after-fmt.log` |
+| `cargo test --workspace` | PASS / 0; 27 host passed, 26 security ignored | `after-host.log` |
+| `npm run build:program` | PASS / 0; warnings retained below | `after-program.log` |
+| `npm run build:idl` | PASS / 0; 24 instructions, unchanged IDL | `after-idl.log` |
+| `npm run test:vm` | PASS / 0; 26 passed, 0 failed, 0 ignored | `after-vm.log` |
+| `git diff --check`, including completed docs | PASS / 0 | `after-diff.log`, `final-diff.log` |
+
+Actual versions (`before-versions.log`, exit0): Node22.22.1/npm9.2.0, TypeScript5.9.2, web3.js1.99.0, Anchor Rust/TS0.32.1, Rust/Cargo1.99.0, Agave2.3.0, LiteSVM0.7.1. Builds explicitly select SBF tools v1.57 and actual solana rustc1.95.0-dev; bare cargo-build-sbf output still lists default v1.48/1.84.1. Repository-local tool paths/OpenSSL environment were used. No dependency/lockfile upgrade and no npm lint command.
+
+Freshly invoked main build artifact SHA256: `20b063fc0dc2fc9ebf9bdb473284c405b9f1423b41ba8bd5d2bb1861d52e1e81`; the explicit VM used this file, with no DeclaredProgramIdMismatch. Source/SDK/Anchor/generated IDL program id is unchanged `Fg6PaFpoGXkYsidMpWxTWqkZ86H8vFnafnHCW3Yj6nD`; IDL SHA256 `dd0f3590b61ca2d06c47bc225c18b3b6a967b20ef2ac51e128e594b6d473f5a1`, byte-identical to HEAD. Host ignored counts were followed by actual explicit VM execution and are not counted as financial tests.
+
+The standard syscall postprocess and dual-crate-type warnings remain in the SBF build output. No stack errors; current identical-artifact VM hashing/account/financial paths actually pass without corresponding runtime syscall errors. Node punycode deprecation is retained. No toolchain or security-check relaxation to remove warnings. The initial sandbox CreateProcess failure was an environment startup issue; approved execution succeeded. Official source web cache-miss was followed by a successful GitHub source read. Final required gates have no implementation-caused or pre-existing repository failure and no unresolved ENV_BLOCKED condition.
+
+**NOT_RUN:** validator/deployment (not required by this Handoff), public-cluster truncation reproduction, historical financial reconstruction or production data inspection. October8 loopback evidence remains historical and is not claimed as a current run. No keys, database, logs or build artifacts are committed.
+
+Verified result: **READY_FOR_DEPLOYMENT_REVIEW** for the correction and its required local matrix. No actual unprocessed production signature was examined. Persistent truncation remains a capability boundary: ERROR with the blocking signature, no checkpoint bypass or synthetic events, and NOT_CLEARED_FOR_DEVNET until complete verifiable evidence exists. Test-provider recovery is not a promise of real-provider recovery or historical completeness. No scope exception, merge/force push/release/deployment/real funds; architecture, Mission/Milestone, economic, ABI and authority boundaries preserved. Final delivery SHA is the Git commit containing this record and the final execution report (`git log -1 --format=%H -- docs/validation.md`).

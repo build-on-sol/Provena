@@ -196,6 +196,9 @@ export class RpcEventPoller {
     }
   }
   private parseLogs(logs: readonly string[], invoked: ReadonlySet<string>, signature: string, slot: number): IndexedEvent[] {
+    // Runtime truncation can leave balanced frames and decodable prefix events.
+    // Reject the whole transaction before parsing or persisting any prefix.
+    requireCondition(!logs.includes('Log truncated'), 'IncompleteChainLogs', 503);
     const frames: Array<{ program: string; events: IndexedEvent[] }> = [];
     const committed: IndexedEvent[] = [];
     let index = 0;

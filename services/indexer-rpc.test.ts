@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { BN, BorshCoder, Idl, utils } from '@coral-xyz/anchor';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { EventIndexer, RpcEventPoller } from './indexer';
-import { LocalStore } from './store';
+import { LocalStore, ServiceError } from './store';
 
 const PROGRAM = new PublicKey('Fg6PaFpoGXkYsidMpWxTWqkZ86H8vFnafnHCW3Yj6nD');
 const key = (n: number) => new PublicKey(Buffer.alloc(32, n));
@@ -226,4 +226,89 @@ test('concurrent poll requests share one execution and do not race a durable che
   assert.equal(rpc.calls.filter(call => call.method === 'getTransaction').length, 1);
   assert.equal(indexer.events().length, 1);
   assert.equal(sync(indexer).status, 'SYNCED');
+});
+
+for (const position of ['inside', 'outside-before', 'outside-after', 'foreign-only'] as const) {
+  test(`log truncation rejects a balanced successful transaction: ${position}`, async t => {
+    const { rpc, poller, indexer, logs } = await fixture(t);
+    const truncated = position === 'inside'
+      ? [`Program ${PROGRAM} invoke [1]`, 'Program log: Instruction: Tip', 'Log truncated',
+        `Program ${PROGRAM} consumed 30000 of 200000 compute units`, `Program ${PROGRAM} success`]
+      : position === 'outside-before' ? ['Log truncated', ...logs(999)]
+        : position === 'foreign-only' ? [`Program ${foreign} invoke [1]`, 'Log truncated', `Program ${foreign} success`]
+          : [...logs(999), 'Log truncated'];
+    rpc.add(rawTransaction(1, position === 'inside' ? 'legacy' : position === 'outside-before' ? 0 : 1, truncated, position === 'foreign-only' ? foreign : PROGRAM));
+    await assert.rejects(poller.pollOnce(), error => error instanceof ServiceError && error.code === 'IncompleteChainLogs' && error.status === 503);
+    assert.equal(indexer.events().length, 0);
+    assert.equal(indexer.store.snapshot().checkpoint, null);
+    assert.deepEqual(sync(indexer).error, { code: 'IncompleteChainLogs', signature: signature(1) });
+    assert.equal(sync(indexer).status, 'ERROR');
+  });
+}
+
+test('log truncation does not confuse ordinary program text or successful no-event transactions', async t => {
+  const { rpc, poller, indexer, logs } = await fixture(t);
+  const ordinaryText = logs(10);
+  ordinaryText.splice(2, 0, 'Program log: Log truncated');
+  rpc.add(rawTransaction(1, 'legacy', ordinaryText));
+  rpc.add(rawTransaction(2, 0, [`Program ${PROGRAM} invoke [1]`, 'Program log: Log truncated', `Program ${PROGRAM} success`]));
+  rpc.add(rawTransaction(3, 1, [`Program ${foreign} invoke [1]`, 'Program log: Log truncated', `Program ${foreign} success`], foreign));
+  assert.equal(await poller.pollOnce(), 3);
+  assert.equal(indexer.events().length, 1);
+  assert.equal(indexer.metrics(content.toBase58()).revenueByAsset[mint.toBase58()]!.tip, '10');
+  assert.equal(sync(indexer).status, 'SYNCED');
+  assert.equal(sync(indexer).checkpoint, signature(3));
+});
+
+test('log truncation preserves S1, blocks S2/S3 across retry restart and concurrency, and recovers exactly once', async t => {
+  const { rpc, poller, indexer, logs, event, path, idl } = await fixture(t);
+  rpc.add(rawTransaction(1, 'legacy', logs(10)));
+  rpc.add(rawTransaction(2, 1, [`Program ${PROGRAM} invoke [1]`, 'Program log: Instruction: Tip', event(777),
+    'Log truncated', `Program ${PROGRAM} consumed 30000 of 200000 compute units`, `Program ${PROGRAM} success`]));
+  rpc.add(rawTransaction(3, 0, logs(30)));
+  const rejected = (error: unknown) => error instanceof ServiceError && error.code === 'IncompleteChainLogs' && error.status === 503;
+  await assert.rejects(poller.pollOnce(), rejected);
+  const expected = indexer.store.snapshot();
+  assert.equal(expected.checkpoint, signature(1));
+  assert.deepEqual(indexer.events().map(value => [value.signature, value.data.amount]), [[signature(1), '10']]);
+  const blocked = (value: EventIndexer) => {
+    assert.equal(sync(value).status, 'ERROR');
+    assert.equal(sync(value).checkpoint, signature(1));
+    assert.deepEqual(sync(value).error, { code: 'IncompleteChainLogs', signature: signature(2) });
+    assert.equal(value.metrics(content.toBase58()).indexerSync.status, 'ERROR');
+    assert.equal(value.claimDashboard(payer.toBase58()).indexerSync.error!.signature, signature(2));
+    assert.equal(rpc.calls.some(call => call.method === 'getTransaction' && call.params[0] === signature(3)), false);
+  };
+  blocked(indexer);
+  await assert.rejects(poller.pollOnce(), rejected);
+  assert.deepEqual(indexer.store.snapshot(), expected);
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), expected);
+
+  const restarted = new EventIndexer(await LocalStore.open(path));
+  assert.equal(sync(restarted).status, 'NOT_STARTED');
+  assert.deepEqual(restarted.store.snapshot(), expected);
+  const recovery = new RpcEventPoller(rpc.connection, PROGRAM, idl, restarted);
+  const readsBefore = rpc.calls.filter(call => call.method === 'getTransaction').length;
+  await Promise.all([assert.rejects(recovery.pollOnce(), rejected), assert.rejects(recovery.pollOnce(), rejected)]);
+  assert.equal(rpc.calls.filter(call => call.method === 'getTransaction').length - readsBefore, 1);
+  blocked(restarted);
+  assert.deepEqual(restarted.store.snapshot(), expected);
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), expected);
+
+  // Only this deterministic test provider switches to verified complete evidence.
+  // A persistently truncated real RPC response must stay blocked, never skipped.
+  rpc.transactions.set(signature(2), rawTransaction(2, 1, logs(20)));
+  assert.equal(await recovery.pollOnce(), 2);
+  assert.deepEqual(restarted.events().map(value => [value.signature, value.data.amount]),
+    [[signature(1), '10'], [signature(2), '20'], [signature(3), '30']]);
+  assert.equal(restarted.metrics(content.toBase58()).revenueByAsset[mint.toBase58()]!.tip, '60');
+  assert.equal(sync(restarted).checkpoint, signature(3));
+  assert.equal(sync(restarted).status, 'SYNCED');
+  assert.equal(sync(restarted).error, null);
+  assert.equal(await recovery.pollOnce(), 0);
+  assert.equal(restarted.events().length, 3);
+  await restarted.store.transact(state => { state.checkpoint = null; });
+  assert.equal(await recovery.pollOnce(), 3);
+  assert.equal(restarted.events().length, 3);
+  assert.equal(restarted.metrics(content.toBase58()).revenueByAsset[mint.toBase58()]!.tip, '60');
 });
